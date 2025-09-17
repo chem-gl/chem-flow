@@ -377,6 +377,20 @@ impl FlowRepository for InMemoryFlowRepository {
         Ok(flows.contains_key(flow_id))
     }
 
+    /// Devuelve el status actual del flow (si existe).
+    fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>> {
+        let flows = self.lock(&self.flows)?;
+        Ok(flows.get(flow_id).map(|m| m.status.clone()).flatten())
+    }
+
+    /// Actualiza el status del flow y devuelve el FlowMeta actualizado.
+    fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta> {
+        let mut flows = self.lock(&self.flows)?;
+        let meta = flows.get_mut(flow_id).ok_or(FlowError::NotFound(format!("flow {}", flow_id)))?;
+        meta.status = new_status.clone();
+        Ok(meta.clone())
+    }
+
     /// Cuenta cuántos pasos tiene un flow. -1 si no existe.
     ///
     /// Sólo cuenta pasos con `cursor <= current_cursor` del flujo para

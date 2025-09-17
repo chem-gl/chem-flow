@@ -48,7 +48,6 @@ services:
       - ./crates/chem-providers/python:/app/python:ro
       - ./crates/chem-providers/requirements.txt:/app/requirements.txt:ro
     # Production container should not bind-mount the whole workspace (keeps image reproducible)
-
   app-dev:
     build:
       context: .

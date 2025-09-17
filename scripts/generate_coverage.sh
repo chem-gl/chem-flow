@@ -21,8 +21,16 @@ echo "[coverage] Construyendo imagen Docker '${IMAGE_NAME}'..."
 DEV_IMAGE_NAME="${IMAGE_NAME}-dev"
 docker build -t ${DEV_IMAGE_NAME} --target base --build-arg FEATURES="${FEATURES_ARG}" -f Dockerfile .
 
-echo "[coverage] (opcional) construyendo imagen runtime '${IMAGE_NAME}'..."
-docker build -t ${IMAGE_NAME} --build-arg FEATURES="${FEATURES_ARG}" -f Dockerfile . || true
+# Opcional: construir la imagen runtime completa. Esto dispara la etapa
+# `builder` que ejecuta `cargo build`. Por defecto lo dejamos desactivado
+# para no forzar compilaciones pesadas durante generación de coverage.
+# Para forzarlo exporta BUILD_RUNTIME=1 en el entorno.
+if [ "${BUILD_RUNTIME:-0}" = "1" ]; then
+  echo "[coverage] construyendo imagen runtime '${IMAGE_NAME}' (BUILD_RUNTIME=1)..."
+  docker build -t ${IMAGE_NAME} --build-arg FEATURES="${FEATURES_ARG}" -f Dockerfile . || true
+else
+  echo "[coverage] salto construcción runtime (para forzar exporta BUILD_RUNTIME=1)"
+fi
 
 
 echo "[coverage] Ejecutando contenedor para generar coverage..."
@@ -98,14 +106,17 @@ docker run --name "$CN" --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfi
   -e LD_LIBRARY_PATH=/opt/conda/lib \
   -v "${ROOT_DIR}":/workspace -w /workspace ${DEV_IMAGE_NAME} \
   bash -lc 'set -euo pipefail
-    echo "[coverage/container] instalando cargo-tarpaulin (si es necesario)..."
-    cargo install cargo-tarpaulin --force || true
+    echo "[coverage/container] asegurando cargo-tarpaulin (solo instalar si falta)..."
+    if ! command -v cargo-tarpaulin >/dev/null 2>&1; then
+      echo "[coverage/container] cargo-tarpaulin no encontrado; instalando..."
+      cargo install cargo-tarpaulin || true
+    else
+      echo "[coverage/container] cargo-tarpaulin ya instalado; salto instalación"
+    fi
 
-    echo "[coverage/container] generando LCOV (coverage/lcov.info) ..."
-    cargo tarpaulin --workspace --out Lcov --output-dir coverage || true
-
-    echo "[coverage/container] generando Cobertura XML (coverage/*.xml) y comprobando umbral..."
-    cargo tarpaulin --workspace --out Xml --output-dir coverage --fail-under 90
+    echo "[coverage/container] generando LCOV y Cobertura XML en una sola ejecución (y comprobando umbral)..."
+    # Ejecutar tarpaulin una vez produciendo ambos formatos para evitar recompilaciones dobles
+    cargo tarpaulin --workspace --out Lcov --out Xml --output-dir coverage --fail-under 90
 
     echo "[coverage/container] listado de coverage/"
     ls -la coverage || true

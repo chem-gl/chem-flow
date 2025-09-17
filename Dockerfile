@@ -22,8 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install RDKit via conda (conda-forge)
-RUN mamba install -y -c conda-forge "python=3.11" rdkit && \
-    /opt/conda/bin/pip install --no-cache-dir -r /workspace/crates/chem-providers/requirements.txt || true
+RUN mamba install -y -c conda-forge "python=3.11" rdkit
 
 # Install rustup and Rust toolchain
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable && \
@@ -33,7 +32,40 @@ RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable && \
 # Add cargo bin to PATH
 ENV PATH=/root/.cargo/bin:$PATH
 
-# Copy workspace
+# Install nightly toolchain and cargo-tarpaulin to avoid runtime installs inside
+# the coverage container. cargo-tarpaulin historically requires nightly; installing
+# it in the image prevents `cargo install` from triggering rustup downloads at
+# container runtime.
+RUN /root/.cargo/bin/rustup toolchain install nightly || true && \
+    /root/.cargo/bin/rustup run nightly /root/.cargo/bin/cargo install cargo-tarpaulin --locked || true
+
+# Copy only manifests first to leverage Docker layer cache for dependencies
+COPY Cargo.toml Cargo.lock ./
+COPY crates/chem-domain/Cargo.toml crates/chem-domain/Cargo.toml
+COPY crates/flow/Cargo.toml crates/flow/Cargo.toml
+COPY crates/chem-persistence/Cargo.toml crates/chem-persistence/Cargo.toml
+COPY crates/chem-providers/Cargo.toml crates/chem-providers/Cargo.toml
+COPY crates/chem-providers/requirements.txt crates/chem-providers/requirements.txt
+
+# Pre-fetch cargo dependencies (useful to cache registry/git downloads)
+RUN cargo fetch || true
+
+# Instalar requirements de Python ahora que requirements.txt está presente
+RUN /opt/conda/bin/pip install --no-cache-dir -r crates/chem-providers/requirements.txt || true
+
+# NOTE: we separate the "base" stage (toolchain + deps) from the
+# "builder" stage (compilation). The `coverage-runner`/dev image should
+# use the `base` stage so we don't compile the workspace when building
+# the dev image (tarpaulin / tests will compile on-demand inside the
+# container). This preserves Docker layer cache for long-lived steps
+# like apt/mamba/rustup/cargo fetch.
+
+## Builder stage (compilation) ------------------------------
+FROM base AS builder
+
+# Copiar el resto del workspace y compilar en una etapa separada.
+# Mantener la compilación fuera del `base` para que el dev image no
+# ejecute `cargo build` durante su construcción.
 COPY . /workspace
 
 # Allow selecting cargo features at build time (e.g. pg_demo)
@@ -57,10 +89,10 @@ ENV PYO3_PYTHON=/opt/conda/bin/python \
 WORKDIR /app
 
 # Copy conda env and built binary from builder
-COPY --from=base /opt/conda /opt/conda
-COPY --from=base /workspace/target/release/main-core /app/main-core
-COPY --from=base /workspace/crates/chem-providers/python /app/python
-COPY --from=base /workspace/crates/chem-providers/requirements.txt /app/requirements.txt
+COPY --from=builder /opt/conda /opt/conda
+COPY --from=builder /workspace/target/release/main-core /app/main-core
+COPY --from=builder /workspace/crates/chem-providers/python /app/python
+COPY --from=builder /workspace/crates/chem-providers/requirements.txt /app/requirements.txt
 
 # Copy entrypoint script and make executable
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

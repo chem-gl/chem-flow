@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("5) Crear paso (append) en un flow");
         println!("6) Ver flujo completo (con pasos)");
         println!("7) Mostrar mapa simple de flujos");
+    println!("9) Ver/actualizar status de un flow");
         println!("8) Salir");
         print!("Elige una opción: ");
         io::stdout().flush().ok();
@@ -33,6 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "5" => create_step_interactive(&repo)?,
             "6" => view_flow_full(&repo)?,
             "7" => print_flow_map(&repo)?,
+            "9" => view_update_status_interactive(&repo)?,
             "8" => { println!("Saliendo..."); break; }
             other => println!("Opción inválida: {}", other),
         }
@@ -168,6 +170,31 @@ fn print_flow_map(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
     for f in &flows {
         let pid = f.parent_flow_id.map(|u| u.to_string()).unwrap_or_else(|| "-".into());
         println!("{} -> {}", pid, f.id);
+    }
+    Ok(())
+}
+
+fn view_update_status_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+    // list flows
+    let (flows, _data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    if flows.is_empty() { println!("No hay flujos disponibles"); return Ok(()); }
+    println!("Selecciona flow por número para ver/actualizar status:");
+    for (i, f) in flows.iter().enumerate() { println!("[{}] {} name={:?} status={:?}", i, f.id, f.name, f.status); }
+    let sel = prompt("Número del flow: ")?;
+    let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
+    if idx >= flows.len() { println!("Índice fuera de rango"); return Ok(()); }
+    let fid = flows[idx].id;
+    // get current status via repo
+    match repo.get_flow_status(&fid) {
+        Ok(cur) => println!("Status actual: {:?}", cur),
+        Err(e) => eprintln!("Error obteniendo status: {}", e),
+    }
+    let new = prompt("Nuevo status (enter para dejar vacío, o escribir 'skip' para no cambiar): ")?;
+    if new.trim().to_lowercase() == "skip" { println!("No se realizó ningún cambio"); return Ok(()); }
+    let new_status = if new.trim().is_empty() { None } else { Some(new.trim().to_string()) };
+    match repo.set_flow_status(&fid, new_status) {
+        Ok(meta) => println!("Status actualizado. Nuevo meta: id={} status={:?}", meta.id, meta.status),
+        Err(e) => eprintln!("Error actualizando status: {}", e),
     }
     Ok(())
 }

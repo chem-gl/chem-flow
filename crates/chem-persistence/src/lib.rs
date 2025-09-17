@@ -376,6 +376,37 @@ impl FlowRepository for DieselFlowRepository {
         Ok(c > 0)
     }
 
+    fn get_flow_status(&self, flow_id: &Uuid) -> FlowResult<Option<String>> {
+        use schema::flows::dsl::*;
+        let mut conn = self.conn()?;
+        let fid = flow_id.to_string();
+        let row_opt = flows.filter(id.eq(&fid)).select(status).first::<Option<String>>(&mut conn).optional().map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+        Ok(row_opt.flatten())
+    }
+
+    fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> FlowResult<FlowMeta> {
+        use diesel::prelude::*;
+        use schema::flows::dsl::*;
+        let mut conn = self.conn()?;
+        let fid = flow_id.to_string();
+        // Update the status
+        map_db_err(diesel::update(flows.filter(id.eq(&fid))).set(status.eq(new_status.clone())).execute(&mut conn))?;
+        // Return updated meta
+        let row = map_db_err(flows.filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
+        Ok(FlowMeta {
+            id: Uuid::parse_str(&row.id).unwrap(),
+            name: row.name,
+            status: row.status,
+            created_by: row.created_by,
+            created_at: Utc.timestamp_opt(row.created_at_ts, 0).single().unwrap_or(Utc::now()),
+            current_cursor: row.current_cursor,
+            current_version: row.current_version,
+            parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
+            parent_cursor: row.parent_cursor,
+            metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})),
+        })
+    }
+
     fn count_steps(&self, flow_id: &Uuid) -> FlowResult<i64> {
         let mut conn = self.conn()?;
         let fid = flow_id.to_string();

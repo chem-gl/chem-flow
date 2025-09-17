@@ -74,6 +74,12 @@ pub trait FlowRepository: Send + Sync {
     /// Claim de trabajo para workers. Marca job como in-flight o devuelve
     /// `None`.
     fn claim_work(&self, worker_id: &str) -> Result<Option<WorkItem>>;
+
+    /// Obtiene el estado (status) actual del flow.
+    fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>>;
+
+    /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se actualizó correctamente.
+    fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta>;
 }
 
 // Store traits para separar implementaciones de bajo nivel.

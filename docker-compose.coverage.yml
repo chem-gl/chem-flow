@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  # Servicio ligero cuya única responsabilidad es crear y mantener los
+  # volúmenes necesarios para acelerar builds/coverage. Mantenerlo en
+  # ejecución permite que los volúmenes permanezcan montados y listos.
+  coverage-volumes:
+    image: alpine:3.18
+    command: ["sh", "-c", "mkdir -p /workspace && tail -f /dev/null"]
+    volumes:
+      - flow_cargo_target:/workspace/target
+      - flow_cargo_registry:/root/.cargo/registry
+      - flow_cargo_git:/root/.cargo/git
+      - flow_conda_pkgs:/opt/conda/pkgs
+      - flow_pip_cache:/root/.cache/pip
+    restart: unless-stopped
+
+  # Runner que usa la etapa 'base' (builder) del Dockerfile y ejecuta
+  # el script de coverage montando los volúmenes de cache.
+  coverage-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    image: flow-chem-ci-dev
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace:delegated
+      - flow_cargo_target:/workspace/target
+      - flow_cargo_registry:/root/.cargo/registry
+      - flow_cargo_git:/root/.cargo/git
+      - flow_conda_pkgs:/opt/conda/pkgs
+      - flow_pip_cache:/root/.cache/pip
+    environment:
+      # El script soporta montar caches desde HOST_CACHE_DIR, pero con
+      # docker compose montamos directamente los volúmenes nombrados.
+      HOST_CACHE_DIR: /workspace/.cache/flow
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "chmod +x ./scripts/generate_coverage.sh && ./scripts/generate_coverage.sh",
+      ]
+    tty: true
+volumes:
+  flow_cargo_target:
+  flow_cargo_registry:
+  flow_cargo_git:
+  flow_conda_pkgs:
+  flow_pip_cache:
