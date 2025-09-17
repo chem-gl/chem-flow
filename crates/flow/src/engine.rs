@@ -146,7 +146,7 @@ impl<R> FlowEngine<R> where R: FlowRepository
 
     /// Lectura directa de `FlowData` desde el repositorio a partir de un
     /// `from_cursor` (exclusive).
-    pub fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>> {
+    pub fn get_items(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>> {
         self.repo.read_data(flow_id, from_cursor)
     }
 
@@ -159,7 +159,7 @@ impl<R> FlowEngine<R> where R: FlowRepository
     /// Firma ergonomica: se pasa `name`, `status`, `parent_cursor` y
     /// `metadata`. El repositorio generará el nuevo id y copiará los datos
     /// necesarios.
-    pub fn create_branch(&self,
+    pub fn new_branch(&self,
                          parent_flow_id: &Uuid,
                          name: Option<String>,
                          status: Option<String>,

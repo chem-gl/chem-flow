@@ -21,13 +21,13 @@ fn main() -> Result<(), FlowError> {
         println!("append {} result: {:?}", i, res);
     }
     // Leer y mostrar los 6 pasos
-    let items = engine.read_data(&flow_id, 0)?;
+    let items = engine.get_items(&flow_id, 0)?;
     println!("original items: {:?}\n", items);
 
     // Crear una rama a partir del cursor 6
     let parent_cursor = 6;
     // crear branch desde snapshot/cursor: se pasa nombre, estado y cursor
-    let new_flow_id = engine.create_branch(&flow_id,
+    let new_flow_id = engine.new_branch(&flow_id,
                                            Some("testing branch".into()),
                                            Some("queued".into()),
                                            parent_cursor,
@@ -44,12 +44,12 @@ fn main() -> Result<(), FlowError> {
     }
 
     // Leer datos de la rama
-    let branch_items = engine.read_data(&new_flow_id, 0)?;
+    let branch_items = engine.get_items(&new_flow_id, 0)?;
     println!("branch items: {:?}\n", branch_items);
 
     // Crear un branch a partir de la nueva rama en cursor 7 (grandchild)
     let grandparent_cursor = 7;
-    let created_grand = engine.create_branch(&new_flow_id,
+    let created_grand = engine.new_branch(&new_flow_id,
                                              Some("grandchild".into()),
                                              Some("queued".into()),
                                              grandparent_cursor,
@@ -65,11 +65,11 @@ fn main() -> Result<(), FlowError> {
         println!("grandchild append {} result: {:?}", k, res);
     }
 
-    let grand_items = engine.read_data(&created_grand, 0)?;
+    let grand_items = engine.get_items(&created_grand, 0)?;
     println!("grandchild items: {:?}\n", grand_items);
 
     // Crear otra rama del flujo principal a partir del paso 3
-    let created_b3 = engine.create_branch(&flow_id, Some("branch3".into()), Some("queued".into()), 3, json!({}))?;
+    let created_b3 = engine.new_branch(&flow_id, Some("branch3".into()), Some("queued".into()), 3, json!({}))?;
     println!("created branch3 {} from {}@3", created_b3, flow_id);
 
     // Añadir 2 pasos en branch3
@@ -80,15 +80,15 @@ fn main() -> Result<(), FlowError> {
         println!("branch3 append {} result: {:?}", m, res);
     }
 
-    let b3_items = engine.read_data(&created_b3, 0)?;
+    let b3_items = engine.get_items(&created_b3, 0)?;
     println!("branch3 items: {:?}\n", b3_items);
 
     // Leer datos finales del flujo original
-    let items = engine.read_data(&flow_id, 0)?;
+    let items = engine.get_items(&flow_id, 0)?;
     println!("items: {:?}", items);
 
     // --- Ejemplo: crear y eliminar una rama completa ---
-    let temp_branch = engine.create_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({}))?;
+    let temp_branch = engine.new_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({}))?;
     println!("created temp branch {} from {}@2", temp_branch, flow_id);
     // Añadir un paso para que tenga contenido
     engine.append(temp_branch, "Step", json!({"m":1}), json!({"source":"temp"}), None, 0)?;
@@ -100,7 +100,7 @@ fn main() -> Result<(), FlowError> {
 
     // --- Ejemplo: crear subramas y eliminar desde un paso específico ---
     // Crear una rama desde cursor 4
-    let parent_for_prune = engine.create_branch(&flow_id, Some("prune-parent".into()), Some("queued".into()), 4, json!({}))?;
+    let parent_for_prune = engine.new_branch(&flow_id, Some("prune-parent".into()), Some("queued".into()), 4, json!({}))?;
     println!("created prune-parent {} from {}@4", parent_for_prune, flow_id);
     // Añadir pasos 1..4 en la rama
     for i in 1..=4 {
@@ -112,7 +112,7 @@ fn main() -> Result<(), FlowError> {
                       (i - 1) as i64)?;
     }
     // Crear una subrama desde cursor 6 del padre
-    let child_of_parent = engine.create_branch(&parent_for_prune,
+    let child_of_parent = engine.new_branch(&parent_for_prune,
                                                Some("child-of-prune".into()),
                                                Some("queued".into()),
                                                6,

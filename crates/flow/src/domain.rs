@@ -68,7 +68,6 @@ pub struct FlowMeta {
 pub enum PersistResult {
     /// OK con nueva versión.
     Ok { new_version: i64 },
-    /// Conflicto de versión.
     Conflict,
 }
 
