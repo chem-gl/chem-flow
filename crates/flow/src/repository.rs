@@ -4,8 +4,8 @@
 // implementar las persistencias (Postgres, in-memory, etc.).
 use crate::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
 use crate::errors::Result;
-use uuid::Uuid;
 use serde_json::Value as JsonValue;
+use uuid::Uuid;
 
 /// Contrato mínimo del repositorio de flujos en el modelo basado en FlowData.
 ///

@@ -15,7 +15,8 @@ use uuid::Uuid;
 ///
 /// Esta capa orquesta el repositorio y el motor. Está pensada para ser
 /// invocada desde un handler HTTP o desde workers.
-pub struct FlowService<R> where R: FlowRepository
+pub struct FlowService<R>
+    where R: FlowRepository
 {
     repo: Arc<R>,
     engine: Arc<FlowEngine<R>>,
@@ -41,12 +42,12 @@ impl<R> FlowService<R> where R: FlowRepository + 'static
     /// `_snapshot_id_or_seq` puede ser id de snapshot o un seq; la función
     /// debe cargar el estado y crear la nueva fila en la BD de forma atómica.
     pub fn create_branch(&self,
-                                       parent_flow_id: Uuid,
-                                       name: Option<String>,
-                                       status: Option<String>,
-                                       parent_cursor: i64,
-                                       metadata: serde_json::Value)
-                                       -> Result<Uuid> {
+                         parent_flow_id: Uuid,
+                         name: Option<String>,
+                         status: Option<String>,
+                         parent_cursor: i64,
+                         metadata: serde_json::Value)
+                         -> Result<Uuid> {
         // Delegar la creación de la rama al repositorio; el repositorio
         // generará el id y copiará los datos necesarios.
         self.repo

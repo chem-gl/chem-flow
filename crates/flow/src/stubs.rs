@@ -29,12 +29,12 @@ impl InMemoryWorkerPool {
 
     /// Encola un item de trabajo para ser reclamado por un worker.
     pub fn enqueue(&self, item: WorkItem) {
-    self.queue.lock().unwrap_or_else(|e| e.into_inner()).push_back(item);
+        self.queue.lock().unwrap_or_else(|e| e.into_inner()).push_back(item);
     }
 
     /// Reclama el siguiente item de trabajo disponible, si existe.
     pub fn claim(&self) -> Option<WorkItem> {
-    self.queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
+        self.queue.lock().unwrap_or_else(|e| e.into_inner()).pop_front()
     }
 }
 
@@ -51,21 +51,27 @@ impl GateService {
 
     /// Abre una gate para un step específico en un flow.
     pub fn open_gate(&self, flow_id: Uuid, step_id: &str, _reason: &str) {
-    self.gates.lock().unwrap_or_else(|e| e.into_inner()).insert((flow_id, step_id.to_string()), true);
+        self.gates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((flow_id, step_id.to_string()), true);
     }
 
     /// Cierra una gate para un step específico en un flow.
     pub fn close_gate(&self, flow_id: Uuid, step_id: &str, _input: serde_json::Value) {
-    self.gates.lock().unwrap_or_else(|e| e.into_inner()).insert((flow_id, step_id.to_string()), false);
+        self.gates
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((flow_id, step_id.to_string()), false);
     }
 
     /// Verifica si una gate está abierta para un step específico en un flow.
     pub fn is_open(&self, flow_id: Uuid, step_id: &str) -> bool {
-       *self.gates
-           .lock()
-           .unwrap_or_else(|e| e.into_inner())
-           .get(&(flow_id, step_id.to_string()))
-           .unwrap_or(&false)
+        *self.gates
+             .lock()
+             .unwrap_or_else(|e| e.into_inner())
+             .get(&(flow_id, step_id.to_string()))
+             .unwrap_or(&false)
     }
 }
 
@@ -87,7 +93,8 @@ impl InMemoryFlowRepository {
                snapshots: Mutex::new(HashMap::new()) }
     }
 
-    /// Helper para mapear `Mutex::lock()` en un `Result` con `FlowError::Storage`.
+    /// Helper para mapear `Mutex::lock()` en un `Result` con
+    /// `FlowError::Storage`.
     fn lock<'a, T>(&'a self, m: &'a Mutex<T>) -> std::result::Result<MutexGuard<'a, T>, FlowError> {
         m.lock().map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))
     }
@@ -103,10 +110,10 @@ impl FlowRepository for InMemoryFlowRepository {
     /// Obtiene los metadatos ligeros de un flow en memoria.
     /// Retorna `NotFound` si el flow no existe.
     fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta> {
-       let flows = self.lock(&self.flows)?;
-       flows.get(flow_id)
-           .cloned()
-           .ok_or(FlowError::NotFound(format!("flow {}", flow_id)))
+        let flows = self.lock(&self.flows)?;
+        flows.get(flow_id)
+             .cloned()
+             .ok_or(FlowError::NotFound(format!("flow {}", flow_id)))
     }
 
     /// Crea un nuevo flow en memoria. Inserta la metadata y devuelve el id.
@@ -129,12 +136,12 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Devuelve el último `SnapshotMeta` para el flow si existe.
     fn load_latest_snapshot(&self, flow_id: &Uuid) -> Result<Option<SnapshotMeta>> {
-    // Elegimos el snapshot de mayor cursor para el flow (si existe).
-    let snaps = self.lock(&self.snapshots)?;
-    Ok(snaps.values()
-        .filter(|s| &s.flow_id == flow_id)
-        .max_by_key(|s| s.cursor)
-        .cloned())
+        // Elegimos el snapshot de mayor cursor para el flow (si existe).
+        let snaps = self.lock(&self.snapshots)?;
+        Ok(snaps.values()
+                .filter(|s| &s.flow_id == flow_id)
+                .max_by_key(|s| s.cursor)
+                .cloned())
     }
 
     /// Carga un snapshot por id. Retorna los bytes (simulados) y la metadata.
@@ -151,11 +158,11 @@ impl FlowRepository for InMemoryFlowRepository {
     fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>> {
         let steps = self.lock(&self.steps)?;
         Ok(steps.get(flow_id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|d| d.cursor > from_cursor)
-            .collect())
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| d.cursor > from_cursor)
+                .collect())
     }
 
     /// Persiste un `FlowData` aplicando control optimista por
@@ -257,15 +264,14 @@ impl FlowRepository for InMemoryFlowRepository {
         // copy steps from parent until parent_cursor
         let mut steps = self.lock(&self.steps)?;
         if let Some(parent_steps) = steps.get(parent_flow_id).cloned() {
-            let copied: Vec<FlowData> = parent_steps
-                .into_iter()
-                .filter(|d| d.cursor <= parent_cursor)
-                .map(|mut d| {
-                    d.id = Uuid::new_v4();
-                    d.flow_id = new_id;
-                    d
-                })
-                .collect();
+            let copied: Vec<FlowData> = parent_steps.into_iter()
+                                                    .filter(|d| d.cursor <= parent_cursor)
+                                                    .map(|mut d| {
+                                                        d.id = Uuid::new_v4();
+                                                        d.flow_id = new_id;
+                                                        d
+                                                    })
+                                                    .collect();
             let entry = steps.entry(new_id).or_default();
             entry.extend(copied);
         } else {

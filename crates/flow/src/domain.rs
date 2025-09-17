@@ -21,7 +21,8 @@ pub struct FlowData {
     pub flow_id: Uuid,
     /// Cursor o secuencia lógica dentro del flujo (monótono).
     pub cursor: i64,
-    /// Llave o tipo semántico del dato (ej. "step-result", "input", "artifact-ref").
+    /// Llave o tipo semántico del dato (ej. "step-result", "input",
+    /// "artifact-ref").
     pub key: String,
     /// Payload con los datos a persistir para este cursor.
     pub payload: serde_json::Value,

@@ -38,18 +38,17 @@ pub struct FlowEngine<R>
     last_replay: Mutex<Vec<FlowData>>,
 }
 
-impl<R> FlowEngine<R>
-where R: FlowRepository
+impl<R> FlowEngine<R> where R: FlowRepository
 {
     /// Crea una nueva instancia del motor.
     /// `repo` es el repositorio inyectado; `branching_strategy` decide
     /// ramificaciones.
     pub fn new(repo: Arc<R>, _config: FlowEngineConfig) -> Self {
-        Self { repo,
-               config: FlowEngineConfig {},
-               idempotency_cache: Mutex::new(Default::default()),
-               last_snapshot: Mutex::new(None),
-               last_replay: Mutex::new(Vec::new()) }
+     Self { repo,
+         config: FlowEngineConfig {},
+         idempotency_cache: Mutex::new(Default::default()),
+         last_snapshot: Mutex::new(None),
+         last_replay: Mutex::new(Vec::new()) }
     }
 
     /// Rehidrata el motor: aplica opcional `snapshot_state` y luego reconstruye
@@ -62,23 +61,20 @@ where R: FlowRepository
         // este engine. No aplicamos ni ejecutamos lógica de negocio aquí.
 
         if let Some(bytes) = _snapshot_state {
-            let mut snap = self
-                .last_snapshot
-                .lock()
-                .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
+            let mut snap = self.last_snapshot
+                               .lock()
+                               .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
             *snap = Some(bytes.to_vec());
         } else {
-            let mut snap = self
-                .last_snapshot
-                .lock()
-                .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
+            let mut snap = self.last_snapshot
+                               .lock()
+                               .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
             *snap = None;
         }
 
-        let mut replay = self
-            .last_replay
-            .lock()
-            .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
+        let mut replay = self.last_replay
+                             .lock()
+                             .map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))?;
         replay.clear();
         replay.extend_from_slice(_data);
 
@@ -93,13 +89,13 @@ where R: FlowRepository
     /// parámetros. Calcula el próximo `cursor` a partir de `FlowMeta` y
     /// delega en `persist_data`.
     pub fn append(&self,
-                            flow_id: Uuid,
-                            key: &str,
-                            payload: serde_json::Value,
-                            metadata: serde_json::Value,
-                            command_id: Option<Uuid>,
-                            expected_version: i64)
-                            -> Result<PersistResult> {
+                  flow_id: Uuid,
+                  key: &str,
+                  payload: serde_json::Value,
+                  metadata: serde_json::Value,
+                  command_id: Option<Uuid>,
+                  expected_version: i64)
+                  -> Result<PersistResult> {
         // cargar metadatos del flow para determinar cursor
         let meta: FlowMeta = self.repo.get_flow_meta(&flow_id)?;
         let next_cursor = meta.current_cursor + 1;
@@ -114,6 +110,18 @@ where R: FlowRepository
                               created_at: Utc::now() };
 
         self.persist_data(&data, expected_version)
+    }
+
+    /// Helper ergonómico: crea un nuevo flow delegando al repositorio.
+    /// Retorna el `Uuid` generado.
+    pub fn start_flow(&self, name: Option<String>, status: Option<String>, metadata: serde_json::Value) -> Result<Uuid> {
+        self.repo.create_flow(name, status, metadata)
+    }
+
+    /// Claim/obtener trabajo para un worker identificado por `worker_id`.
+    /// Retorna `Some(WorkItem)` si hay trabajo, `None` si no.
+    pub fn claim_work(&self, worker_id: &str) -> Result<Option<crate::domain::WorkItem>> {
+        self.repo.claim_work(worker_id)
     }
 
     /// Lectura directa de `FlowData` desde el repositorio a partir de un
