@@ -1,7 +1,7 @@
 use flow::engine::FlowEngineConfig;
+use flow::errors::FlowError;
 use flow::stubs::InMemoryFlowRepository;
 use flow::FlowEngine;
-use flow::errors::FlowError;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -27,7 +27,11 @@ fn main() -> Result<(), FlowError> {
     // Crear una rama a partir del cursor 6
     let parent_cursor = 6;
     // crear branch desde snapshot/cursor: se pasa nombre, estado y cursor
-    let new_flow_id = engine.create_branch(&flow_id, Some("testing branch".into()), Some("queued".into()), parent_cursor, json!({}))?;
+    let new_flow_id = engine.create_branch(&flow_id,
+                                           Some("testing branch".into()),
+                                           Some("queued".into()),
+                                           parent_cursor,
+                                           json!({}))?;
     println!("created branch {} from {}@{}", new_flow_id, flow_id, parent_cursor);
 
     // Añadir 3 pasos en la rama
@@ -45,8 +49,13 @@ fn main() -> Result<(), FlowError> {
 
     // Crear un branch a partir de la nueva rama en cursor 7 (grandchild)
     let grandparent_cursor = 7;
-    let created_grand = engine.create_branch(&new_flow_id, Some("grandchild".into()), Some("queued".into()), grandparent_cursor, json!({}))?;
-    println!("created grandchild {} from {}@{}", created_grand, new_flow_id, grandparent_cursor);
+    let created_grand = engine.create_branch(&new_flow_id,
+                                             Some("grandchild".into()),
+                                             Some("queued".into()),
+                                             grandparent_cursor,
+                                             json!({}))?;
+    println!("created grandchild {} from {}@{}",
+             created_grand, new_flow_id, grandparent_cursor);
 
     // Añadir 2 pasos en la grandchild
     for k in 1..=2 {
@@ -77,6 +86,49 @@ fn main() -> Result<(), FlowError> {
     // Leer datos finales del flujo original
     let items = engine.read_data(&flow_id, 0)?;
     println!("items: {:?}", items);
+
+    // --- Ejemplo: crear y eliminar una rama completa ---
+    let temp_branch = engine.create_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({}))?;
+    println!("created temp branch {} from {}@2", temp_branch, flow_id);
+    // Añadir un paso para que tenga contenido
+    engine.append(temp_branch, "Step", json!({"m":1}), json!({"source":"temp"}), None, 0)?;
+    println!("temp branch exists before delete: {}", engine.branch_exists(&temp_branch)?);
+    println!("temp branch steps before delete: {}", engine.count_steps(&temp_branch)?);
+    // Eliminar la rama completa
+    engine.delete_branch(&temp_branch)?;
+    println!("temp branch exists after delete: {}", engine.branch_exists(&temp_branch)?);
+
+    // --- Ejemplo: crear subramas y eliminar desde un paso específico ---
+    // Crear una rama desde cursor 4
+    let parent_for_prune = engine.create_branch(&flow_id, Some("prune-parent".into()), Some("queued".into()), 4, json!({}))?;
+    println!("created prune-parent {} from {}@4", parent_for_prune, flow_id);
+    // Añadir pasos 1..4 en la rama
+    for i in 1..=4 {
+        engine.append(parent_for_prune,
+                      "Step",
+                      json!({"p": i}),
+                      json!({"source":"prune"}),
+                      None,
+                      (i - 1) as i64)?;
+    }
+    // Crear una subrama desde cursor 6 del padre
+    let child_of_parent = engine.create_branch(&parent_for_prune,
+                                               Some("child-of-prune".into()),
+                                               Some("queued".into()),
+                                               6,
+                                               json!({}))?;
+    println!("created child {} from {}@6", child_of_parent, parent_for_prune);
+    engine.append(child_of_parent, "Step", json!({"c": 1}), json!({"source":"child"}), None, 0)?;
+    println!("counts before prune: parent={} child={}",
+             engine.count_steps(&parent_for_prune)?,
+             engine.count_steps(&child_of_parent)?);
+
+    // Ahora eliminar desde el paso 3 en el padre: esto debe borrar pasos >=3 y las
+    // subramas creadas cuyo parent_cursor >=3
+    engine.delete_from_step(&parent_for_prune, 3)?;
+    println!("counts after prune: parent={} child_exists={}",
+             engine.count_steps(&parent_for_prune)?,
+             engine.branch_exists(&child_of_parent)?);
 
     Ok(())
 }

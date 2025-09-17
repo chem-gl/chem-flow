@@ -44,11 +44,11 @@ impl<R> FlowEngine<R> where R: FlowRepository
     /// `repo` es el repositorio inyectado; `branching_strategy` decide
     /// ramificaciones.
     pub fn new(repo: Arc<R>, _config: FlowEngineConfig) -> Self {
-     Self { repo,
-         config: FlowEngineConfig {},
-         idempotency_cache: Mutex::new(Default::default()),
-         last_snapshot: Mutex::new(None),
-         last_replay: Mutex::new(Vec::new()) }
+        Self { repo,
+               config: FlowEngineConfig {},
+               idempotency_cache: Mutex::new(Default::default()),
+               last_snapshot: Mutex::new(None),
+               last_replay: Mutex::new(Vec::new()) }
     }
 
     /// Rehidrata el motor: aplica opcional `snapshot_state` y luego reconstruye
@@ -122,6 +122,26 @@ impl<R> FlowEngine<R> where R: FlowRepository
     /// Retorna `Some(WorkItem)` si hay trabajo, `None` si no.
     pub fn claim_work(&self, worker_id: &str) -> Result<Option<crate::domain::WorkItem>> {
         self.repo.claim_work(worker_id)
+    }
+
+    /// Verifica si existe una rama con el id dado.
+    pub fn branch_exists(&self, flow_id: &Uuid) -> Result<bool> {
+        self.repo.branch_exists(flow_id)
+    }
+
+    /// Cuenta cuántos pasos tiene un flow. -1 si no existe.
+    pub fn count_steps(&self, flow_id: &Uuid) -> Result<i64> {
+        self.repo.count_steps(flow_id)
+    }
+
+    /// Elimina una rama y todas sus subramas.
+    pub fn delete_branch(&self, flow_id: &Uuid) -> Result<()> {
+        self.repo.delete_branch(flow_id)
+    }
+
+    /// Elimina todos los pasos y subramas a partir de un cursor dado.
+    pub fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()> {
+        self.repo.delete_from_step(flow_id, from_cursor)
     }
 
     /// Lectura directa de `FlowData` desde el repositorio a partir de un

@@ -53,6 +53,21 @@ pub trait FlowRepository: Send + Sync {
                      metadata: JsonValue)
                      -> Result<Uuid>;
 
+    /// Verifica si existe una rama/flow con el id dado.
+    fn branch_exists(&self, flow_id: &Uuid) -> Result<bool>;
+
+    /// Cuenta cuántos pasos (`FlowData`) tiene un flow. Debe devolver
+    /// -1 si el flow no existe, 0 si existe pero no tiene pasos.
+    fn count_steps(&self, flow_id: &Uuid) -> Result<i64>;
+
+    /// Elimina una rama y todas sus subramas (recursivo). Borra metadata,
+    /// steps y snapshots asociados.
+    fn delete_branch(&self, flow_id: &Uuid) -> Result<()>;
+
+    /// Elimina todos los pasos y subramas a partir de un cursor dado
+    /// (inclusive) en el flow `flow_id`.
+    fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()>;
+
     /// Lock ligero para actualizaciones (puede mapear a check de versión).
     fn lock_for_update(&self, flow_id: &Uuid, expected_version: i64) -> Result<bool>;
 

@@ -7,12 +7,10 @@ pub mod domain;
 pub mod engine;
 pub mod errors;
 pub mod repository;
-pub mod service;
 pub mod stubs;
 
 pub use domain::*;
 pub use engine::*;
 pub use errors::*;
 pub use repository::*;
-pub use service::*;
 pub use stubs::*;

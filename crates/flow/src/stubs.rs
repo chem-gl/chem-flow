@@ -172,25 +172,31 @@ impl FlowRepository for InMemoryFlowRepository {
         let mut flows = self.lock(&self.flows)?;
         let mut steps = self.lock(&self.steps)?;
         let flow_meta = flows.get_mut(&data.flow_id).ok_or(FlowError::NotFound("flow".into()))?;
-
         // Optimistic concurrency: check expected_version
         if flow_meta.current_version != expected_version {
             return Ok(PersistResult::Conflict);
         }
 
-        // Idempotency: check command_id if present (only when there are existing steps)
+        // Idempotency: if command_id present, ensure we don't duplicate
         if let Some(cmd_id) = data.command_id {
             if let Some(existing) = steps.get(&data.flow_id) {
                 if existing.iter().any(|d| d.command_id == Some(cmd_id)) {
+                    // Return current version (no change)
                     return Ok(PersistResult::Ok { new_version: flow_meta.current_version });
                 }
             }
         }
 
+        // Basic validations: ensure cursor monotonicity
+        if data.cursor <= flow_meta.current_cursor {
+            return Err(FlowError::Conflict(format!("cursor {} not greater than current {}",
+                                                   data.cursor, flow_meta.current_cursor)));
+        }
+
         // Persist the data
         let list = steps.entry(data.flow_id).or_default();
         list.push(data.clone());
-        flow_meta.current_version += 1;
+        flow_meta.current_version = flow_meta.current_version.saturating_add(1);
         flow_meta.current_cursor = data.cursor;
 
         Ok(PersistResult::Ok { new_version: flow_meta.current_version })
@@ -296,13 +302,121 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Lock ligero: en memoria siempre devuelve true (no concurrencia real).
     fn lock_for_update(&self, _flow_id: &Uuid, _expected_version: i64) -> Result<bool> {
-        Ok(true)
+        // In-memory lock: check that the flow exists and version matches expected.
+        let flows = self.lock(&self.flows)?;
+        if let Some(meta) = flows.get(_flow_id) {
+            Ok(meta.current_version == _expected_version)
+        } else {
+            Err(FlowError::NotFound(format!("flow {}", _flow_id)))
+        }
     }
 
     /// Claim de trabajo: en memoria no hay implementación de cola
     /// persistente, por lo que siempre devuelve `None`.
     fn claim_work(&self, _worker_id: &str) -> Result<Option<WorkItem>> {
         Ok(None)
+    }
+
+    /// Verifica si existe una rama/flow con el id dado.
+    fn branch_exists(&self, flow_id: &Uuid) -> Result<bool> {
+        let flows = self.lock(&self.flows)?;
+        Ok(flows.contains_key(flow_id))
+    }
+
+    /// Cuenta cuántos pasos tiene un flow. -1 si no existe.
+    fn count_steps(&self, flow_id: &Uuid) -> Result<i64> {
+        let flows = self.lock(&self.flows)?;
+        if !flows.contains_key(flow_id) {
+            return Ok(-1);
+        }
+        let steps = self.lock(&self.steps)?;
+        let cnt = steps.get(flow_id).map(|v| v.len() as i64).unwrap_or(0);
+        Ok(cnt)
+    }
+
+    /// Elimina una rama y todas sus subramas (recursivo). Borra metadata,
+    /// steps y snapshots asociados.
+    fn delete_branch(&self, flow_id: &Uuid) -> Result<()> {
+        // collect children recursively
+        let mut to_delete: Vec<Uuid> = Vec::new();
+        {
+            let flows = self.lock(&self.flows)?;
+            if !flows.contains_key(flow_id) {
+                return Err(FlowError::NotFound(format!("flow {}", flow_id)));
+            }
+        }
+        // BFS
+        to_delete.push(*flow_id);
+        let mut idx = 0;
+        while idx < to_delete.len() {
+            let current = to_delete[idx];
+            idx += 1;
+            let flows = self.lock(&self.flows)?;
+            for (id, meta) in flows.iter() {
+                if let Some(parent) = meta.parent_flow_id {
+                    if parent == current {
+                        to_delete.push(*id);
+                    }
+                }
+            }
+        }
+
+        // perform deletions
+        let mut flows = self.lock(&self.flows)?;
+        let mut steps = self.lock(&self.steps)?;
+        let mut snaps = self.lock(&self.snapshots)?;
+        for id in to_delete.iter() {
+            flows.remove(id);
+            steps.remove(id);
+            // remove snapshots for this flow
+            let keys: Vec<Uuid> = snaps.iter().filter(|(_, s)| s.flow_id == *id).map(|(k, _)| *k).collect();
+            for k in keys {
+                snaps.remove(&k);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Elimina todos los pasos y subramas a partir de un cursor dado
+    /// (inclusive) en el flow `flow_id`.
+    fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()> {
+        // check exists
+        let flows = self.lock(&self.flows)?;
+        let _meta = flows.get(flow_id)
+                         .cloned()
+                         .ok_or(FlowError::NotFound(format!("flow {}", flow_id)))?;
+        drop(flows);
+
+        // delete steps with cursor >= from_cursor
+        let mut steps = self.lock(&self.steps)?;
+        if let Some(vec) = steps.get_mut(flow_id) {
+            vec.retain(|d| d.cursor < from_cursor);
+        }
+        drop(steps);
+
+        // delete subbranches whose parent_cursor >= from_cursor recursively
+        let mut to_delete: Vec<Uuid> = Vec::new();
+        let flows = self.lock(&self.flows)?;
+        for (id, fm) in flows.iter() {
+            if let Some(p) = fm.parent_flow_id {
+                if p == *flow_id {
+                    if let Some(pc) = fm.parent_cursor {
+                        if pc >= from_cursor {
+                            to_delete.push(*id);
+                        }
+                    }
+                }
+            }
+        }
+        drop(flows);
+
+        for id in to_delete.iter() {
+            // reuse delete_branch to remove subtrees
+            self.delete_branch(id)?;
+        }
+
+        Ok(())
     }
 }
 impl SnapshotStore for InMemoryFlowRepository {
