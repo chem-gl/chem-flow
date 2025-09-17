@@ -1,0 +1,7 @@
+rdkit
+numpy>=1.25
+pandas>=2.1
+rdkit
+mypy
+flake8
+ty
