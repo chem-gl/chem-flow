@@ -24,6 +24,13 @@ pub struct FlowEngineConfig {
 /// - Proveer utilidades para persistir/recuperar datos del flujo
 /// - Decidir cuándo pedir snapshots
 /// - Usar `FlowRepository` para persistir datos/snapshots
+///
+/// Nota sobre errores y concurrencia:
+/// - Los métodos que realizan persistencia delegan en `FlowRepository` y
+///   retornan `FlowError::Conflict` cuando la versión esperada no coincide.
+/// - Este engine es deliberadamente pequeño: la ejecución de la lógica de pasos
+///   (side-effects) debe implementarse fuera del crate para mantener separación
+///   de responsabilidades.
 pub struct FlowEngine<R>
     where R: FlowRepository
 {
@@ -88,6 +95,17 @@ impl<R> FlowEngine<R> where R: FlowRepository
     /// Helper ergonómico: crea y persiste un `FlowData` a partir de
     /// parámetros. Calcula el próximo `cursor` a partir de `FlowMeta` y
     /// delega en `persist_data`.
+    ///
+    /// Input:
+    /// - `flow_id`: identificador del flow.
+    /// - `key`, `payload`, `metadata`: contenido del `FlowData`.
+    /// - `command_id`: opcional, para idempotencia.
+    /// - `expected_version`: versión esperada para locking optimista.
+    ///
+    /// Output:
+    /// - `Ok(PersistResult::Ok)` con la nueva versión cuando se persiste con
+    ///   éxito.
+    /// - `Ok(PersistResult::Conflict)` si la versión no coincide.
     pub fn append(&self,
                   flow_id: Uuid,
                   key: &str,

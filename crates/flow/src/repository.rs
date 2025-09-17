@@ -14,6 +14,9 @@ use uuid::Uuid;
 /// estado en un cursor dado y se guarda inmediatamente.
 pub trait FlowRepository: Send + Sync {
     /// Obtiene metadatos ligeros del `flow`.
+    ///
+    /// Retorna `FlowMeta` con campos como `current_cursor` y `current_version`.
+    /// Debe devolver `Err(FlowError::NotFound)` si el flow no existe.
     fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta>;
 
     /// Crea un nuevo flow (insert en tabla `flows`). El repositorio genera
@@ -24,6 +27,12 @@ pub trait FlowRepository: Send + Sync {
 
     /// Persiste un registro de datos para el flujo. `expected_version` permite
     /// controlar concurrencia (optimistic). Devuelve `PersistResult`.
+    ///
+    /// Comportamiento esperado:
+    /// - Si `expected_version` no coincide con la versión actual ->
+    ///   `PersistResult::Conflict`.
+    /// - Si `command_id` está presente y ya existe un registro con ese
+    ///   `command_id` -> comportamiento idempotente (no duplicar).
     fn persist_data(&self, data: &FlowData, expected_version: i64) -> Result<PersistResult>;
 
     /// Lee registros de datos a partir de un cursor (exclusive), ordenados.

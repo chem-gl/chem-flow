@@ -7,12 +7,14 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Registro de datos del flujo (FlowData).
+/// Registro de datos del flujo (`FlowData`).
 ///
-/// Este crate no ejecuta la lógica de negocio de cada paso; su responsabilidad
-/// es almacenar y recuperar datos asociados al flujo. Cada `FlowData` es un
-/// registro autocontenido (payload + metadata) que puede usarse para
-/// reconstruir o consultar el estado en un cursor dado.
+/// `FlowData` representa un evento o registro persistente asociado a un
+/// flujo. Cada registro contiene un `cursor` monótono que permite ordenar
+/// los eventos; además lleva un `payload` JSON y `metadata` libre.
+///
+/// Importante: este crate no ejecuta la lógica de negocio del step — solo
+/// proporciona la estructura para persistir y recuperar los registros.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowData {
     /// Identificador único del registro de datos.

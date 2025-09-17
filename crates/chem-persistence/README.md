@@ -76,6 +76,34 @@ Para la definición del trait y las firmas exactas consulta `crates/flow/src/rep
 
 Las migraciones SQL están en `migrations/00000000000001_create_schema/`.
 `new_from_env()` aplica las migraciones embebidas automáticamente al crear
+el repositorio (cuando procede), por lo que normalmente no necesitas ejecutar
+comandos manuales de migración en entornos de prueba o desarrollo.
+
+## Cómo ejecutar y probar
+
+Desde la raíz del workspace puedes ejecutar los tests y ejemplos locales:
+
+```bash
+# ejecutar tests (usa sqlite en memoria por defecto)
+cargo test -p chem-persistence
+
+# ejecutar el ejemplo de persistencia (usa DATABASE_URL si está definido)
+cargo run -p chem-persistence --example persistence_simple_usage
+```
+
+Notas rápidas:
+
+- Para pruebas locales se usa SQLite en memoria salvo que se compile con la
+  feature `pg`.
+- Para producción activa la feature `pg` y proporciona una `DATABASE_URL`
+  apuntando a Postgres.
+
+## Contribuciones y mantenimiento
+
+Si vas a extender este crate para producción, considera implementar un
+`SnapshotStore` que guarde blobs en un object store (S3/MinIO) y un
+`ArtifactStore` estable para los artefactos pesados. Añade también pruebas
+de integración apuntando a una BD Postgres dedicada cuando actives `pg`.
 el repositorio, por lo que normalmente no necesitas ejecutar `diesel migration`.
 
 ## Cómo probar y ejecutar (comandos)
