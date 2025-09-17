@@ -24,21 +24,24 @@ use schema::*;
 
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
 
-// Choose the correct connection type for the pool depending on build/test
-// configuration. Production builds default to Postgres (feature "pg").
+// Selecciona el tipo de conexión para el pool según la configuración de
+// compilación/pruebas. En producción se usa Postgres cuando la feature
+// "pg" está habilitada.
 //
-// - When building with `--features pg` for non-test builds we use Postgres.
-// - For tests (cfg(test)) we compile SQLite helpers so tests can use
-//   an in-memory DB regardless of whether the `pg` feature is enabled.
-// - If the crate is built without `pg` in non-test builds, fall back to SQLite.
+// - Al compilar con `--features pg` (y no en modo test) usamos Postgres.
+// - Para las pruebas (`cfg(test)`) se compilan helpers para SQLite, de modo
+//   que las pruebas usen una BD en memoria aunque la feature `pg` esté
+//   presente en la compilación del workspace.
+// - Si el crate se compila sin la feature `pg` en modo no-test, se usa
+//   SQLite como fallback.
 #[cfg(all(feature = "pg", not(test)))]
 type DbPool = Pool<ConnectionManager<PgConnection>>;
 
 #[cfg(any(test, not(feature = "pg")))]
 type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 
-/// Repositorio mínimo usando Diesel + Postgres in production.
-/// SQLite helpers are compiled only for tests.
+/// Repositorio mínimo usando Diesel; en producción puede usar Postgres.
+/// Los helpers para SQLite se compilan sólo en pruebas.
 pub struct DieselFlowRepository {
     pool: Arc<DbPool>,
 }
@@ -105,18 +108,22 @@ struct SnapshotRow {
 
 #[cfg(any(test, not(feature = "pg")))]
 impl DieselFlowRepository {
-    /// Crea una instancia en tests y aplica migraciones embebidas (SQLite).
-    /// This constructor is only available to test builds.
+    /// Crea una instancia para pruebas y aplica las migraciones embebidas (SQLite).
+    /// Este constructor sólo está disponible en compilaciones de prueba.
     pub fn new(database_url: &str) -> Self {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder().build(manager).expect("failed to create pool");
+    let pool = Pool::builder().max_size(1).build(manager).expect("no se pudo crear el pool de conexiones");
         let repo = DieselFlowRepository { pool: Arc::new(pool) };
 
-        // Attempt to run embedded migrations for tests.
+        // Intentar aplicar las migraciones embebidas para las pruebas.
         if let Ok(mut c) = repo.conn_raw() {
+            // Ajustes para evitar 'database table is locked' en pruebas concurrentes
+            // Habilitamos WAL y aumentamos busy_timeout para que las escrituras esperen.
+            let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut c);
+            let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut c);
             match c.run_pending_migrations(MIGRATIONS) {
-                Ok(applied) => eprintln!("chem-persistence (test sqlite): applied {} embedded migrations", applied.len()),
-                Err(e) => eprintln!("chem-persistence (test sqlite): failed to run embedded migrations: {}", e),
+                Ok(applied) => eprintln!("chem-persistence (test sqlite): aplicadas {} migraciones embebidas", applied.len()),
+                Err(e) => eprintln!("chem-persistence (test sqlite): fallo al ejecutar migraciones embebidas: {}", e),
             }
         }
 
@@ -129,13 +136,19 @@ impl DieselFlowRepository {
     }
 
     fn conn_raw(&self) -> std::result::Result<PooledConnection<ConnectionManager<SqliteConnection>>, r2d2::Error> {
-        self.pool.get()
+        let mut conn = self.pool.get()?;
+        // Asegurar PRAGMA en cada conexión pooled para evitar bloqueos
+        let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut conn);
+        let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut conn);
+        Ok(conn)
     }
 }
 
+
+
 #[cfg(all(feature = "pg", not(test)))]
 impl DieselFlowRepository {
-    /// For Postgres builds, return Pg connections from the pool.
+    /// Para compilaciones con Postgres, devuelve conexiones Pg desde el pool.
     pub fn conn(&self) -> FlowResult<PooledConnection<ConnectionManager<PgConnection>>> {
         self.conn_raw().map_err(|e| FlowError::Storage(format!("pool: {}", e)))
     }
@@ -145,20 +158,20 @@ impl DieselFlowRepository {
     }
 }
 
-// Production Postgres implementation of new_from_env. Only compiled when
-// building with `--features pg` and not during tests.
+// Implementación de `new_from_env` para Postgres en producción. Compilada
+// sólo cuando se habilita la feature `pg` y no estamos en modo test.
 #[cfg(all(feature = "pg", not(test)))]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
     dotenvy::dotenv().ok();
     let url = std::env::var("DATABASE_URL").map_err(|_| FlowError::Other("DATABASE_URL not set".into()))?;
-    // Ensure URL looks like Postgres.
     if !(url.starts_with("postgres") || url.starts_with("postgresql://") || url.contains("@")) {
         return Err(FlowError::Other("chem-persistence: DATABASE_URL does not look like Postgres URL".into()));
     }
     DieselFlowRepository::new_pg(&url)
 }
 
-// Test implementation: allow SQLite in-memory DBs. Compiled only for tests.
+// Implementación para pruebas: permite usar SQLite en memoria. Compilada
+// únicamente para tests.
 #[cfg(test)]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
     dotenvy::dotenv().ok();
@@ -167,11 +180,11 @@ pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
     Ok(repo)
 }
 
-// Fallback for builds without the `pg` feature (non-test): if the
-// provided DATABASE_URL looks like SQLite (e.g. `file:` or contains
-// `mode=memory`) we construct a Sqlite-backed repo so integration tests
-// and local dev can still run. Otherwise return an error instructing
-// the user to enable `pg` for Postgres usage.
+// Fallback para compilaciones sin la feature `pg` (no-test): si la
+// `DATABASE_URL` parece apuntar a SQLite (por ejemplo `file:` o contiene
+// `mode=memory`) construimos un repo SQLite para facilitar pruebas e
+// integración local. En caso contrario devolvemos un error indicando al
+// usuario que habilite la feature `pg` para usar Postgres en producción.
 #[cfg(all(not(feature = "pg"), not(test)))]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
     dotenvy::dotenv().ok();
@@ -185,19 +198,19 @@ pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
     Err(FlowError::Other("chem-persistence was compiled without 'pg' feature; enable the 'pg' feature to use Postgres in production".into()))
 }
 
-// Postgres-specific constructors - compiled only when crate is built with
-// feature "pg" and not during tests (to avoid type conflicts with test
-// SQLite DbPool).
+// Constructores específicos para Postgres: compilados sólo cuando la
+// feature "pg" está activada y no durante tests (evita conflictos de
+// tipos con el DbPool de SQLite en las pruebas).
 #[cfg(all(feature = "pg", not(test)))]
 impl DieselFlowRepository {
     pub fn new_pg(database_url: &str) -> FlowResult<DieselFlowRepository> {
         let manager = ConnectionManager::<PgConnection>::new(database_url);
-        let pool = Pool::builder().build(manager).map_err(|e| FlowError::Storage(format!("failed to create pool: {}", e)))?;
+    let pool = Pool::builder().build(manager).map_err(|e| FlowError::Storage(format!("no se pudo crear el pool de conexiones: {}", e)))?;
         let repo = DieselFlowRepository { pool: Arc::new(pool) };
         if let Ok(mut c) = repo.conn_raw() {
             match c.run_pending_migrations(MIGRATIONS) {
-                Ok(applied) => eprintln!("chem-persistence(pg): applied {} embedded migrations", applied.len()),
-                Err(e) => eprintln!("chem-persistence(pg): failed to run embedded migrations: {}", e),
+                Ok(applied) => eprintln!("chem-persistence (pg): aplicadas {} migraciones embebidas", applied.len()),
+                Err(e) => eprintln!("chem-persistence (pg): fallo al ejecutar migraciones embebidas: {}", e),
             }
         }
         Ok(repo)
@@ -304,7 +317,7 @@ impl FlowRepository for DieselFlowRepository {
         let mut conn = self.conn()?;
         let sid = snapshot_id.to_string();
         let r = snapshots.filter(id.eq(&sid)).first::<SnapshotRow>(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-        // Return the raw bytes of the state_ptr string (no external deps)
+    // Devolver los bytes crudos del campo `state_ptr` (sin dependencias externas)
         let bytes = r.state_ptr.clone().into_bytes();
         let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(), flow_id: Uuid::parse_str(&r.flow_id).unwrap(), cursor: r.cursor, state_ptr: r.state_ptr.clone(), metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})), created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
         Ok((bytes, meta))
@@ -376,6 +389,16 @@ impl FlowRepository for DieselFlowRepository {
         conn.transaction::<(), diesel::result::Error, _>(|conn| {
             // borrar steps
             diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
+            // borrar snapshots
+            diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
+
+            // orphan children: any flows that had parent_flow_id == fid should
+            // be updated to have NULL parent_flow_id and NULL parent_cursor so
+            // they become roots (huérfanos). This preserves child branches.
+            diesel::update(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))))
+                .set((flows_dsl::parent_flow_id.eq::<Option<String>>(None), flows_dsl::parent_cursor.eq::<Option<i64>>(None)))
+                .execute(conn)?;
+
             // borrar la fila del flow
             diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
             Ok(())

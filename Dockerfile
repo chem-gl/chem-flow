@@ -70,5 +70,3 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 && rm -r
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-# default command for production: run the built binary
-CMD ["/app/main-core"]

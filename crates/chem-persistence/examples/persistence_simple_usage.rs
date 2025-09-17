@@ -6,9 +6,12 @@ use serde_json::json;
 use uuid::Uuid;
 
 fn main() {
-    // Forzamos DB en memoria para ejemplo local
-    std::env::set_var("DATABASE_URL", "file:memdb1?mode=memory&cache=shared");
-    let repo = new_from_env().expect("repo");
+    // El ejemplo por defecto usa la variable de entorno DATABASE_URL.
+    // Para demos locales rápidos puedes exportar:
+    //   export DATABASE_URL="file:memdb1?mode=memory&cache=shared"
+    // Si no se proporciona, `new_from_env` intentará conectarse a Postgres
+    // usando la URL definida en el entorno (útil para demostraciones con PG).
+    let repo = new_from_env().expect("no se pudo inicializar el repositorio");
 
     // Crear flow
     let flow_id = repo.create_flow(Some("example".into()), Some("queued".into()), json!({}))

@@ -1,9 +1,16 @@
 // Archivo: stubs.rs
 // Propósito: implementaciones en memoria para pruebas y wiring rápido.
 //
-// Incluye un repositorio en memoria (`InMemoryFlowRepository`), un pool de
-// workers y stubs para stores. Estas implementaciones no son durables y se
-// usan para demos o pruebas locales.
+// Contenido:
+// - `InMemoryFlowRepository`: repositorio en memoria (no duradero) que
+//   implementa `FlowRepository`, `SnapshotStore` y `ArtifactStore` para
+//   facilitar pruebas y ejemplos.
+// - `InMemoryWorkerPool`: cola en memoria simple para `WorkItem`.
+// - `GateService`: servicio ligero en memoria para controlar gates por step.
+//
+// Estas implementaciones son intencionalmente sencillas y no garantizan
+// durabilidad, aislamiento concurrente real ni escalabilidad; están pensadas
+// para demos, tests unitarios y como referencia.
 use crate::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
 use crate::errors::{FlowError, Result};
 use crate::repository::{ArtifactStore, FlowRepository, SnapshotStore};
@@ -14,8 +21,9 @@ use uuid::Uuid;
 
 /// Pool simple en memoria para encolar y reclamar `WorkItem`.
 ///
-/// Uso pensado para pruebas locales y ejemplos. No garantiza durabilidad
-/// ni comportamiento distribuido.
+/// Uso: destinado a pruebas y ejemplos locales. No provee garantías de
+/// durabilidad ni comportamiento distribuido. Es un contenedor muy ligero
+/// pensado solo para simulación.
 #[derive(Debug)]
 pub struct InMemoryWorkerPool {
     queue: Mutex<VecDeque<WorkItem>>,
@@ -28,6 +36,9 @@ impl InMemoryWorkerPool {
     }
 
     /// Encola un item de trabajo para ser reclamado por un worker.
+    ///
+    /// Nota: en este stub el bloqueo se desbloquea inmediatamente; en una
+    /// implementación real habría mecanismos de notificación/condvar.
     pub fn enqueue(&self, item: WorkItem) {
         self.queue.lock().unwrap_or_else(|e| e.into_inner()).push_back(item);
     }
@@ -39,7 +50,10 @@ impl InMemoryWorkerPool {
 }
 
 pub struct GateService {
-    /// Mapa (flow_id, step_id) -> open?
+    /// Mapa (flow_id, step_id) -> abierto?
+    ///
+    /// true = abierta, false = cerrada. El propósito es simular gates para
+    /// pasos que pueden bloquear/esperar entrada externa en tests.
     gates: Mutex<HashMap<(Uuid, String), bool>>,
 }
 
@@ -50,6 +64,9 @@ impl GateService {
     }
 
     /// Abre una gate para un step específico en un flow.
+    ///
+    /// `reason` es un campo informativo usado solo en la API; no se persiste
+    /// ni se registra en este stub.
     pub fn open_gate(&self, flow_id: Uuid, step_id: &str, _reason: &str) {
         self.gates
             .lock()
@@ -58,6 +75,9 @@ impl GateService {
     }
 
     /// Cierra una gate para un step específico en un flow.
+    ///
+    /// `_input` es la carga que podría desbloquear la gate; en este stub se
+    /// ignora y solo se graba el estado.
     pub fn close_gate(&self, flow_id: Uuid, step_id: &str, _input: serde_json::Value) {
         self.gates
             .lock()
@@ -75,13 +95,13 @@ impl GateService {
     }
 }
 
-// Minimal in-memory repository for wiring examples (not durable)
+// Repositorio mínimo en memoria para ejemplos y wiring (no durable)
 pub struct InMemoryFlowRepository {
     /// Metadatos de flows indexados por `flow_id`.
     flows: Mutex<HashMap<Uuid, FlowMeta>>,
-    /// Registros de FlowData por flow.
+    /// Registros de `FlowData` por flow (ordenados por inserción/`cursor`).
     steps: Mutex<HashMap<Uuid, Vec<FlowData>>>,
-    /// Snapshots metadata por snapshot id.
+    /// Snapshots metadata indexados por snapshot id.
     snapshots: Mutex<HashMap<Uuid, SnapshotMeta>>,
 }
 
@@ -95,6 +115,9 @@ impl InMemoryFlowRepository {
 
     /// Helper para mapear `Mutex::lock()` en un `Result` con
     /// `FlowError::Storage`.
+    ///
+    /// Evita propagar directamente el `PoisonError` de Mutex y convierte
+    /// el fallo en un `FlowError::Storage` con mensaje informativo.
     fn lock<'a, T>(&'a self, m: &'a Mutex<T>) -> std::result::Result<MutexGuard<'a, T>, FlowError> {
         m.lock().map_err(|e| FlowError::Storage(format!("mutex poisoned: {:?}", e)))
     }
@@ -108,7 +131,8 @@ impl Default for InMemoryFlowRepository {
 
 impl FlowRepository for InMemoryFlowRepository {
     /// Obtiene los metadatos ligeros de un flow en memoria.
-    /// Retorna `NotFound` si el flow no existe.
+    ///
+    /// Retorna `NotFound` si el `flow` no existe.
     fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta> {
         let flows = self.lock(&self.flows)?;
         flows.get(flow_id)
@@ -117,6 +141,10 @@ impl FlowRepository for InMemoryFlowRepository {
     }
 
     /// Crea un nuevo flow en memoria. Inserta la metadata y devuelve el id.
+    ///
+    /// `name`, `status` y `metadata` son valores ergonomicos; los campos
+    /// `created_by`, `created_at`, `current_cursor` y `current_version` se
+    /// generan automáticamente.
     fn create_flow(&self, name: Option<String>, status: Option<String>, metadata: serde_json::Value) -> Result<Uuid> {
         // Generar id y metadatos básicos
         let id = Uuid::new_v4();
@@ -135,6 +163,9 @@ impl FlowRepository for InMemoryFlowRepository {
     }
 
     /// Devuelve el último `SnapshotMeta` para el flow si existe.
+    ///
+    /// Si existen varios snapshots asociados al flow, se devuelve el de
+    /// mayor `cursor`.
     fn load_latest_snapshot(&self, flow_id: &Uuid) -> Result<Option<SnapshotMeta>> {
         // Elegimos el snapshot de mayor cursor para el flow (si existe).
         let snaps = self.lock(&self.snapshots)?;
@@ -145,6 +176,9 @@ impl FlowRepository for InMemoryFlowRepository {
     }
 
     /// Carga un snapshot por id. Retorna los bytes (simulados) y la metadata.
+    ///
+    /// En este stub los bytes retornados son vacíos (no se persigue
+    /// serialización real), pero la metadata es la almacenada en memoria.
     fn load_snapshot(&self, snapshot_id: &Uuid) -> Result<(Vec<u8>, SnapshotMeta)> {
         let snaps = self.lock(&self.snapshots)?;
         let meta = snaps.get(snapshot_id)
@@ -155,6 +189,8 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Lee los `FlowData` para un `flow_id` a partir de `from_cursor`
     /// (exclusive), ordenados por cursor.
+    ///
+    /// Retorna un vector vacío si no hay pasos para el `flow_id`.
     fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>> {
         let steps = self.lock(&self.steps)?;
         Ok(steps.get(flow_id)
@@ -168,6 +204,14 @@ impl FlowRepository for InMemoryFlowRepository {
     /// Persiste un `FlowData` aplicando control optimista por
     /// `expected_version` y deduplicación por `command_id` cuando está
     /// presente.
+    ///
+    /// Reglas principales:
+    /// - Si `expected_version` no coincide con `current_version` del flow,
+    ///   devuelve `PersistResult::Conflict`.
+    /// - Si `command_id` está presente y existe un registro con el mismo
+    ///   `command_id`, se considera idempotente y no se inserta de nuevo.
+    /// - El `cursor` del nuevo dato debe ser estrictamente mayor que el
+    ///   `current_cursor` del flow.
     fn persist_data(&self, data: &FlowData, expected_version: i64) -> Result<PersistResult> {
         let mut flows = self.lock(&self.flows)?;
         let mut steps = self.lock(&self.steps)?;
@@ -204,6 +248,8 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Guarda metadata de snapshot en memoria. El `state_ptr` es solamente
     /// un string/clave simbólica en esta implementación.
+    ///
+    /// Retorna el `Uuid` generado para el snapshot.
     fn save_snapshot(&self, flow_id: &Uuid, seq: i64, state_ptr: &str, metadata: serde_json::Value) -> Result<uuid::Uuid> {
         let id = Uuid::new_v4();
         let meta = SnapshotMeta { id,
@@ -218,7 +264,13 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Crea una nueva rama en memoria: genera `new_id`, copia todos los
     /// `FlowData` del padre con `cursor <= parent_cursor` y añade un
-    /// `BranchCreated` al final. Devuelve `new_id`.
+    /// registro `BranchCreated` al final. Devuelve `new_id`.
+    ///
+    /// Comportamiento:
+    /// - Si el padre no existe, se crea una metadata nueva basada en los
+    ///   parámetros provistos.
+    /// - Los pasos copiados reciben nuevos `id` y `flow_id` para mantener
+    ///   la independencia de la rama hija.
     fn create_branch(&self,
                      parent_flow_id: &Uuid,
                      name: Option<String>,
@@ -264,10 +316,10 @@ impl FlowRepository for InMemoryFlowRepository {
                        metadata }
         };
 
-        // insert new flow meta
+    // insertar metadata de la nueva rama
         self.lock(&self.flows)?.insert(new_id, meta.clone());
 
-        // copy steps from parent until parent_cursor
+    // copiar pasos del padre hasta `parent_cursor` (inclusive)
         let mut steps = self.lock(&self.steps)?;
         if let Some(parent_steps) = steps.get(parent_flow_id).cloned() {
             let copied: Vec<FlowData> = parent_steps.into_iter()
@@ -285,7 +337,8 @@ impl FlowRepository for InMemoryFlowRepository {
             println!("[stub] no parent steps found for {}", parent_flow_id);
         }
 
-        // Create a BranchCreated step as the next cursor
+    // Crear un registro `BranchCreated` como siguiente cursor para la
+    // nueva rama (indica creación y referencia al padre).
         let st = FlowData { id: Uuid::new_v4(),
                             flow_id: new_id,
                             cursor: parent_cursor + 1,
@@ -300,7 +353,8 @@ impl FlowRepository for InMemoryFlowRepository {
         Ok(new_id)
     }
 
-    /// Lock ligero: en memoria siempre devuelve true (no concurrencia real).
+    /// Lock ligero: en memoria se simula comprobando versión; no hay
+    /// bloqueo distribuido real.
     fn lock_for_update(&self, _flow_id: &Uuid, _expected_version: i64) -> Result<bool> {
         // In-memory lock: check that the flow exists and version matches expected.
         let flows = self.lock(&self.flows)?;
@@ -324,54 +378,61 @@ impl FlowRepository for InMemoryFlowRepository {
     }
 
     /// Cuenta cuántos pasos tiene un flow. -1 si no existe.
+    ///
+    /// Sólo cuenta pasos con `cursor <= current_cursor` del flujo para
+    /// evitar contabilizar registros auxiliares creados como helper.
     fn count_steps(&self, flow_id: &Uuid) -> Result<i64> {
         let flows = self.lock(&self.flows)?;
         if !flows.contains_key(flow_id) {
             return Ok(-1);
         }
+        // Only count steps up to the flow's current_cursor. This ensures
+        // that helper records (e.g. BranchCreated with cursor = parent_cursor+1)
+        // don't get counted as visible steps for the flow.
+        let current_cursor = flows.get(flow_id).map(|m| m.current_cursor).unwrap_or(0);
         let steps = self.lock(&self.steps)?;
-        let cnt = steps.get(flow_id).map(|v| v.len() as i64).unwrap_or(0);
+        let cnt = steps.get(flow_id)
+                       .map(|v| v.iter().filter(|d| d.cursor <= current_cursor).count() as i64)
+                       .unwrap_or(0);
         Ok(cnt)
     }
 
-    /// Elimina una rama y todas sus subramas (recursivo). Borra metadata,
-    /// steps y snapshots asociados.
+    /// Elimina una rama pero NO borra sus hijos.
+    ///
+    /// Nuevo comportamiento: cuando se elimina una rama/flow, los hijos que
+    /// tenían `parent_flow_id` apuntando a ésta pasan a quedar huérfanos;
+    /// es decir, se actualiza su `parent_flow_id` y `parent_cursor` a `None`
+    /// y se dejan como ramas principales. Sólo se eliminan la metadata,
+    /// los pasos y snapshots del flow solicitado.
     fn delete_branch(&self, flow_id: &Uuid) -> Result<()> {
-        // collect children recursively
-        let mut to_delete: Vec<Uuid> = Vec::new();
+        // verify exists
         {
             let flows = self.lock(&self.flows)?;
             if !flows.contains_key(flow_id) {
                 return Err(FlowError::NotFound(format!("flow {}", flow_id)));
             }
         }
-        // BFS
-        to_delete.push(*flow_id);
-        let mut idx = 0;
-        while idx < to_delete.len() {
-            let current = to_delete[idx];
-            idx += 1;
-            let flows = self.lock(&self.flows)?;
-            for (id, meta) in flows.iter() {
-                if let Some(parent) = meta.parent_flow_id {
-                    if parent == current {
-                        to_delete.push(*id);
-                    }
-                }
-            }
-        }
 
-        // perform deletions
+        // remove the flow's metadata, steps and snapshots
         let mut flows = self.lock(&self.flows)?;
         let mut steps = self.lock(&self.steps)?;
         let mut snaps = self.lock(&self.snapshots)?;
-        for id in to_delete.iter() {
-            flows.remove(id);
-            steps.remove(id);
-            // remove snapshots for this flow
-            let keys: Vec<Uuid> = snaps.iter().filter(|(_, s)| s.flow_id == *id).map(|(k, _)| *k).collect();
-            for k in keys {
-                snaps.remove(&k);
+
+        flows.remove(flow_id);
+        steps.remove(flow_id);
+        let keys: Vec<Uuid> = snaps.iter().filter(|(_, s)| s.flow_id == *flow_id).map(|(k, _)| *k).collect();
+        for k in keys {
+            snaps.remove(&k);
+        }
+
+        // Hijos huérfanos: encontrar flujos cuyo `parent_flow_id` == flow_id y
+        // actualizar sus campos para que no apunten al padre borrado.
+        for (_, meta) in flows.iter_mut() {
+            if let Some(parent) = meta.parent_flow_id {
+                if parent == *flow_id {
+                    meta.parent_flow_id = None;
+                    meta.parent_cursor = None;
+                }
             }
         }
 
@@ -380,6 +441,11 @@ impl FlowRepository for InMemoryFlowRepository {
 
     /// Elimina todos los pasos y subramas a partir de un cursor dado
     /// (inclusive) en el flow `flow_id`.
+    ///
+    /// Comportamiento:
+    /// - Se mantienen los pasos con `cursor < from_cursor`.
+    /// - Se eliminan recursivamente las ramas hijas cuyo `parent_cursor`
+    ///   sea >= `from_cursor`.
     fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()> {
         // check exists
         let flows = self.lock(&self.flows)?;
@@ -395,7 +461,7 @@ impl FlowRepository for InMemoryFlowRepository {
         }
         drop(steps);
 
-        // delete subbranches whose parent_cursor >= from_cursor recursively
+    // eliminar subramas cuyo `parent_cursor` >= from_cursor recursivamente
         let mut to_delete: Vec<Uuid> = Vec::new();
         let flows = self.lock(&self.flows)?;
         for (id, fm) in flows.iter() {

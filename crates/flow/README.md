@@ -1,119 +1,90 @@
-# Crate `flow` — documentación ampliada
+## Crate `flow` — documentación resumida en español
 
-Este crate proporciona una capa de persistencia orientada a eventos para
-flujos de trabajo. Su responsabilidad principal es almacenar registros
-autocontenidos (`FlowData`), gestionar snapshots y soportar la creación
-de ramas (branches). La ejecución de la lógica de negocio de cada paso
-queda fuera del crate: un worker o motor externo se rehidrata desde los
-registros y aplica la lógica correspondiente.
+El crate `flow` define los tipos y traits que modelan la persistencia basada
+en registros (`FlowData`) y provee implementaciones en memoria (stubs) y un
+motor de ayuda (`FlowEngine`) para rehidratación y operaciones ergonomicas.
 
 Contenido principal
 
 - `FlowRepository` — trait que define el contrato de persistencia (Postgres,
-  in-memory, etc.).
+  SQLite, in-memory, etc.).
 - `InMemoryFlowRepository` — implementación en memoria para demos y pruebas.
-- `FlowEngine` — helpers ergonómicos que usan el repositorio para facilitar
-  operaciones comunes (append, read, snapshots, create_branch, etc.).
-- `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult` — tipos de dominio.
+- `FlowEngine` — helpers que usan el repositorio para operaciones comunes
+  (crear flujo, añadir pasos, crear ramas, snapshots, etc.).
+- Tipos de dominio: `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult`.
 
 Quick start
 
-1. Desde la raíz del workspace:
+1. Desde la raíz del workspace, ejecutar el ejemplo de uso en memoria:
 
 ```bash
 cd crates/flow
-cargo run --example simple_usage
+cargo run --example flow_simple_usage
 ```
 
-2. El ejemplo `examples/simple_usage.rs` muestra un flujo completo:
-   crear un flow, añadir pasos, crear ramas, crear subramas, eliminar
-   ramas y eliminar desde un cursor (prune).
+2. El ejemplo muestra: crear un flujo, añadir pasos, crear ramas y subramas,
+   añadir pasos en las ramas, y consultar/depurar el contenido.
 
-Principios de diseño
+Principios y comportamiento
 
-- Persistencia basada en registros (`FlowData`): cada registro es
-  autocontenido y permite reconstruir el estado con snapshot + replay.
-- Idempotencia: se soporta `command_id` para evitar duplicados.
-- Locking optimista: operaciones de persistencia reciben `expected_version`
-  para evitar races y retornan `Conflict` en caso de desajuste.
-- Creación de ramas: el repositorio debe crear la rama de forma atómica
-  (copiar pasos hasta el cursor dado y adicionar un `BranchCreated`).
+- Persistencia por registros: cada `FlowData` es autocontenido y permite
+  reconstruir el estado mediante snapshot + replay.
+- Idempotencia: se admite `command_id` en `FlowData` para prevenir duplicados.
+- Locking optimista: operaciones que modifican el flujo usan `expected_version`
+  para detectar conflictos y devolver `PersistResult::Conflict` cuando aplica.
+- Branching: `create_branch` debe ser atómico desde la perspectiva del
+  repositorio (copiar pasos y snapshots hasta el cursor indicado).
 
-Diagrama de clases (simplificado)
+Diagramas (resumen)
 
-```mermaid
-classDiagram
-    class FlowRepository {
-        <<trait>>
-        +get_flow_meta(flow_id)
-        +create_flow(name,status,metadata)
-        +persist_data(data, expected_version)
-        +read_data(flow_id, from_cursor)
-        +new_branch(parent_flow_id, name, status, parent_cursor, metadata)
-        +delete_branch(flow_id)
-        +delete_from_step(flow_id, from_cursor)
-    }
-
-    class InMemoryFlowRepository {
-        +flows: HashMap<Uuid, FlowMeta>
-        +steps: HashMap<Uuid, Vec<FlowData>>
-    }
-
-    class FlowEngine {
-        +start_flow(...)
-        +append(...)
-        +read_data(...)
-        +create_branch(...)
-    }
-
-    FlowRepository <|-- InMemoryFlowRepository
-    FlowEngine o-- FlowRepository
-```
-
-Diagrama de secuencia: crear rama desde cursor
+Diagrama de secuencia (crear rama desde engine -> repo):
 
 ```mermaid
 sequenceDiagram
     participant Caller
     participant Engine
     participant Repo
-    Caller->>Engine: create_branch(parent_id, cursor)
+    Caller->>Engine: request new branch (parent_id, cursor)
     Engine->>Repo: create_branch(parent_id, name, status, cursor, metadata)
-    Repo->>Repo: copy steps where cursor <= parent_cursor
+    Repo->>Repo: copy steps and snapshots where cursor <= parent_cursor
     Repo-->>Engine: new_branch_id
     Engine-->>Caller: new_branch_id
 ```
 
-Diagrama de estado simplificado de un `Flow`
+Estado simplificado de un flow:
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued
     queued --> running: claim_work
-    running --> waiting: step blocked on gate
+    running --> waiting: blocked on gate
     running --> queued: finish/idle
     waiting --> running: gate_open
     running --> completed: terminal step
 ```
 
-Notas prácticas
+Notas prácticas y comportamiento importante
 
-- `InMemoryFlowRepository` es útil para pruebas rápidas y ejemplos, pero
-  no sustituye una implementación transaccional en Postgres + object store
-  para snapshots/artifacts.
-- Para producción, implemente `FlowRepository` sobre Postgres y Object
-  Storage (S3, MinIO). Asegúrate de que `create_branch`, `delete_branch`
-  y `delete_from_step` se ejecuten dentro de transacciones donde sea
-  necesario.
+- `InMemoryFlowRepository` es una implementación apta para pruebas y ejemplos.
+  No es transaccional ni durable; para producción se recomienda una
+  implementación sobre Postgres + object store para snapshots y artifacts.
+- `delete_branch` en las implementaciones actuales NO borra recursivamente
+  ramas hijas; en su lugar las orfana (actualiza `parent_flow_id`/`parent_cursor`
+  a NULL). Ajusta la implementación si necesitas borrado recursivo.
 
 Tests y validación
 
-- Encontrarás pruebas de integración en `crates/flow/tests/` que cubren
-  el comportamiento del `InMemoryFlowRepository` (prune, delete branch,
-  count_steps).
+- Tests unitarios y de integración para `InMemoryFlowRepository` se encuentran
+  en `crates/flow/tests/`.
+- Para ejecutar los tests del crate `flow`:
+
+```bash
+cargo test -p flow
+```
 
 Contribuciones y siguientes pasos
 
-- Añadir una implementación productiva `PostgresFlowRepository`.
-- Mejorar el modelo de snapshots (copias copy-on-write para artifacts).
-- Añadir más ejemplos y pruebas que simulen concurrencia.
+- Implementar `PostgresFlowRepository` (transaccional) y un `SnapshotStore`
+  que guarde estados en un object store.
+- Añadir pruebas de concurrencia y validación de copia de snapshots al crear
+  ramas.

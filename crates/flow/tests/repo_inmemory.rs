@@ -82,3 +82,34 @@ fn count_steps_nonexistent_returns_minus_one() {
     let random = Uuid::new_v4();
     assert_eq!(repo.count_steps(&random).unwrap(), -1);
 }
+
+#[test]
+fn child_preserves_steps_after_parent_deletion() {
+    let repo = InMemoryFlowRepository::new();
+    let parent = repo.create_flow(Some("parent-preserve".into()), None, json!({"p": true})).unwrap();
+    // append 4 steps
+    let mut expected = 0i64;
+    for i in 1..=4 {
+        let d = FlowData { id: Uuid::new_v4(), flow_id: parent, cursor: i, key: "Step".into(), payload: json!({"v": i}), metadata: json!({"m": i}), command_id: None, created_at: Utc::now() };
+        match repo.persist_data(&d, expected).unwrap() {
+            PersistResult::Ok { new_version } => expected = new_version,
+            PersistResult::Conflict => panic!("conflict"),
+        }
+    }
+
+    // create child from cursor 4 (should clone 4 steps)
+    let child = repo.create_branch(&parent, Some("child-preserve".into()), None, 4, json!({})).unwrap();
+    assert!(repo.branch_exists(&child).unwrap());
+    // child must have 4 steps (cloned)
+    assert_eq!(repo.count_steps(&child).unwrap(), 4);
+
+    // delete parent -> child should remain and keep its steps and metadata
+    repo.delete_branch(&parent).unwrap();
+    assert!(!repo.branch_exists(&parent).unwrap());
+    assert!(repo.branch_exists(&child).unwrap());
+    let child_count = repo.count_steps(&child).unwrap();
+    assert_eq!(child_count, 4);
+    // verify metadata of one step preserved
+    let items = repo.read_data(&child, 0).unwrap();
+    assert_eq!(items[0].metadata["m"].as_i64().unwrap(), 1);
+}

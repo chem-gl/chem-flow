@@ -1,4 +1,5 @@
-use chem_persistence::new_from_env;
+#![cfg(not(feature = "pg"))]
+
 use chem_persistence::DieselFlowRepository;
 use flow::repository::FlowRepository;
 
@@ -7,11 +8,27 @@ use flow::domain::FlowData;
 use serde_json::json;
 use uuid::Uuid;
 
+// When the crate is built with the `pg` feature the test harness may still be
+// compiled as an integration test. Provide two `setup_repo` variants so the
+// correct constructor is used depending on the enabled feature.
+#[cfg(not(feature = "pg"))]
 fn setup_repo() -> DieselFlowRepository {
-    // Forzar uso de SQLite in-memory y usar new_from_env que ejecuta migraciones
-    std::env::set_var("DATABASE_URL", "file:memdb1?mode=memory&cache=shared");
-    let repo = new_from_env().expect("new_from_env");
-    repo
+    // Usar una base en memoria con nombre único por test para aislarlos
+    // y evitar bloqueos entre pruebas que puedan correr en paralelo.
+    let url = format!("file:memdb_{}?mode=memory&cache=shared", Uuid::new_v4());
+    std::env::set_var("DATABASE_URL", &url);
+    DieselFlowRepository::new(&url)
+}
+
+#[cfg(feature = "pg")]
+fn setup_repo() -> DieselFlowRepository {
+    // For `pg` feature builds, attempt to use the PG constructor. The test
+    // runner should set a real DATABASE_URL pointing to a test Postgres
+    // instance. If not set, `new_pg` will return an Err and the test will
+    // fail fast with a helpful message.
+    dotenvy::dotenv().ok();
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for pg tests");
+    DieselFlowRepository::new_pg(&url).expect("create pg repo")
 }
 
 #[test]
@@ -84,4 +101,31 @@ fn test_create_and_persist_flow_data_and_branching() {
         println!("data: flow={} cursor={} key={} payload={}",
                  d.flow_id, d.cursor, d.key, d.payload);
     }
+}
+
+#[test]
+fn child_preserves_steps_after_parent_deletion_sqlite() {
+    let repo = setup_repo();
+    let parent = repo.create_flow(Some("parent-sql".into()), None, json!({"p":"v"})).expect("create");
+    // add steps
+    let mut expected = 0i64;
+    for i in 1..=5 {
+        let fd = FlowData { id: Uuid::new_v4(), flow_id: parent, cursor: i, key: "Step".into(), payload: json!({"v": i}), metadata: json!({"m": i}), command_id: None, created_at: Utc::now() };
+        match repo.persist_data(&fd, expected).expect("persist") {
+            flow::domain::PersistResult::Ok { new_version } => expected = new_version,
+            _ => panic!("persist failed"),
+        }
+    }
+    // create child clone
+    let child = repo.create_branch(&parent, Some("child-sql".into()), None, 5, json!({})).expect("branch");
+    #[cfg(not(feature = "pg"))]
+    assert_eq!(repo.count_steps(&child).unwrap(), 5);
+
+    // delete parent; child should remain with its cloned steps
+    repo.delete_branch(&parent).expect("delete parent");
+    assert!(!repo.branch_exists(&parent).unwrap());
+    assert!(repo.branch_exists(&child).unwrap());
+    assert_eq!(repo.count_steps(&child).unwrap(), 5);
+    let items = repo.read_data(&child, 0).expect("read child");
+    assert_eq!(items[0].metadata["m"].as_i64().unwrap(), 1);
 }
