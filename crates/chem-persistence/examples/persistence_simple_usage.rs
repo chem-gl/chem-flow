@@ -29,7 +29,7 @@ fn main() {
                             metadata: json!({}),
                             command_id: None,
                             created_at: now };
-        let _ = repo.persist_data(&fd, (i - 1) as i64).expect("persist");
+        let _ = repo.persist_data(&fd, i - 1).expect("persist");
     }
     let items = repo.read_data(&flow_id, 0).expect("read");
     println!("original items: {}", items.len());
@@ -55,7 +55,7 @@ fn main() {
                             metadata: json!({}),
                             command_id: None,
                             created_at: now };
-        let _ = repo.persist_data(&fd, (j - 1) as i64).expect("persist branch");
+        let _ = repo.persist_data(&fd, j - 1).expect("persist branch");
     }
 
     let branch_items = repo.read_data(&new_flow_id, 0).expect("read branch");
@@ -75,7 +75,7 @@ fn main() {
                             metadata: json!({}),
                             command_id: None,
                             created_at: now };
-        let _ = repo.persist_data(&fd, (m - 1) as i64).expect("persist b3");
+        let _ = repo.persist_data(&fd, m - 1).expect("persist b3");
     }
 
     // Crear y eliminar una rama temporal

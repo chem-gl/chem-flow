@@ -49,6 +49,12 @@ impl InMemoryWorkerPool {
     }
 }
 
+impl Default for InMemoryWorkerPool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct GateService {
     /// Mapa (flow_id, step_id) -> abierto?
     ///
@@ -92,6 +98,12 @@ impl GateService {
              .unwrap_or_else(|e| e.into_inner())
              .get(&(flow_id, step_id.to_string()))
              .unwrap_or(&false)
+    }
+}
+
+impl Default for GateService {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -269,8 +281,8 @@ impl FlowRepository for InMemoryFlowRepository {
     /// Comportamiento:
     /// - Si el padre no existe, se crea una metadata nueva basada en los
     ///   parámetros provistos.
-    /// - Los pasos copiados reciben nuevos `id` y `flow_id` para mantener
-    ///   la independencia de la rama hija.
+    /// - Los pasos copiados reciben nuevos `id` y `flow_id` para mantener la
+    ///   independencia de la rama hija.
     fn create_branch(&self,
                      parent_flow_id: &Uuid,
                      name: Option<String>,
@@ -316,10 +328,10 @@ impl FlowRepository for InMemoryFlowRepository {
                        metadata }
         };
 
-    // insertar metadata de la nueva rama
+        // insertar metadata de la nueva rama
         self.lock(&self.flows)?.insert(new_id, meta.clone());
 
-    // copiar pasos del padre hasta `parent_cursor` (inclusive)
+        // copiar pasos del padre hasta `parent_cursor` (inclusive)
         let mut steps = self.lock(&self.steps)?;
         if let Some(parent_steps) = steps.get(parent_flow_id).cloned() {
             let copied: Vec<FlowData> = parent_steps.into_iter()
@@ -337,8 +349,8 @@ impl FlowRepository for InMemoryFlowRepository {
             println!("[stub] no parent steps found for {}", parent_flow_id);
         }
 
-    // Crear un registro `BranchCreated` como siguiente cursor para la
-    // nueva rama (indica creación y referencia al padre).
+        // Crear un registro `BranchCreated` como siguiente cursor para la
+        // nueva rama (indica creación y referencia al padre).
         let st = FlowData { id: Uuid::new_v4(),
                             flow_id: new_id,
                             cursor: parent_cursor + 1,
@@ -380,13 +392,14 @@ impl FlowRepository for InMemoryFlowRepository {
     /// Devuelve el status actual del flow (si existe).
     fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>> {
         let flows = self.lock(&self.flows)?;
-        Ok(flows.get(flow_id).map(|m| m.status.clone()).flatten())
+        Ok(flows.get(flow_id).and_then(|m| m.status.clone()))
     }
 
     /// Actualiza el status del flow y devuelve el FlowMeta actualizado.
     fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta> {
         let mut flows = self.lock(&self.flows)?;
-        let meta = flows.get_mut(flow_id).ok_or(FlowError::NotFound(format!("flow {}", flow_id)))?;
+        let meta = flows.get_mut(flow_id)
+                        .ok_or(FlowError::NotFound(format!("flow {}", flow_id)))?;
         meta.status = new_status.clone();
         Ok(meta.clone())
     }
@@ -458,8 +471,8 @@ impl FlowRepository for InMemoryFlowRepository {
     ///
     /// Comportamiento:
     /// - Se mantienen los pasos con `cursor < from_cursor`.
-    /// - Se eliminan recursivamente las ramas hijas cuyo `parent_cursor`
-    ///   sea >= `from_cursor`.
+    /// - Se eliminan recursivamente las ramas hijas cuyo `parent_cursor` sea >=
+    ///   `from_cursor`.
     fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()> {
         // check exists
         let flows = self.lock(&self.flows)?;
@@ -475,7 +488,7 @@ impl FlowRepository for InMemoryFlowRepository {
         }
         drop(steps);
 
-    // eliminar subramas cuyo `parent_cursor` >= from_cursor recursivamente
+        // eliminar subramas cuyo `parent_cursor` >= from_cursor recursivamente
         let mut to_delete: Vec<Uuid> = Vec::new();
         let flows = self.lock(&self.flows)?;
         for (id, fm) in flows.iter() {

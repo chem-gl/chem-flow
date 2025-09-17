@@ -28,10 +28,10 @@ fn main() -> Result<(), FlowError> {
     let parent_cursor = 6;
     // crear branch desde snapshot/cursor: se pasa nombre, estado y cursor
     let new_flow_id = engine.new_branch(&flow_id,
-                                           Some("testing branch".into()),
-                                           Some("queued".into()),
-                                           parent_cursor,
-                                           json!({}))?;
+                                        Some("testing branch".into()),
+                                        Some("queued".into()),
+                                        parent_cursor,
+                                        json!({}))?;
     println!("created branch {} from {}@{}", new_flow_id, flow_id, parent_cursor);
 
     // Añadir 3 pasos en la rama
@@ -50,10 +50,10 @@ fn main() -> Result<(), FlowError> {
     // Crear un branch a partir de la nueva rama en cursor 7 (grandchild)
     let grandparent_cursor = 7;
     let created_grand = engine.new_branch(&new_flow_id,
-                                             Some("grandchild".into()),
-                                             Some("queued".into()),
-                                             grandparent_cursor,
-                                             json!({}))?;
+                                          Some("grandchild".into()),
+                                          Some("queued".into()),
+                                          grandparent_cursor,
+                                          json!({}))?;
     println!("created grandchild {} from {}@{}",
              created_grand, new_flow_id, grandparent_cursor);
 
@@ -113,10 +113,10 @@ fn main() -> Result<(), FlowError> {
     }
     // Crear una subrama desde cursor 6 del padre
     let child_of_parent = engine.new_branch(&parent_for_prune,
-                                               Some("child-of-prune".into()),
-                                               Some("queued".into()),
-                                               6,
-                                               json!({}))?;
+                                            Some("child-of-prune".into()),
+                                            Some("queued".into()),
+                                            6,
+                                            json!({}))?;
     println!("created child {} from {}@6", child_of_parent, parent_for_prune);
     engine.append(child_of_parent, "Step", json!({"c": 1}), json!({"source":"child"}), None, 0)?;
     println!("counts before prune: parent={} child={}",

@@ -67,7 +67,9 @@ pub struct FlowMeta {
 #[derive(Debug, Clone)]
 pub enum PersistResult {
     /// OK con nueva versión.
-    Ok { new_version: i64 },
+    Ok {
+        new_version: i64,
+    },
     Conflict,
 }
 

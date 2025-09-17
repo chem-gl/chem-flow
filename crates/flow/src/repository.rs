@@ -78,7 +78,8 @@ pub trait FlowRepository: Send + Sync {
     /// Obtiene el estado (status) actual del flow.
     fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>>;
 
-    /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se actualizó correctamente.
+    /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se
+    /// actualizó correctamente.
     fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta>;
 }
 

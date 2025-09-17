@@ -106,18 +106,27 @@ fn test_create_and_persist_flow_data_and_branching() {
 #[test]
 fn child_preserves_steps_after_parent_deletion_sqlite() {
     let repo = setup_repo();
-    let parent = repo.create_flow(Some("parent-sql".into()), None, json!({"p":"v"})).expect("create");
+    let parent = repo.create_flow(Some("parent-sql".into()), None, json!({"p":"v"}))
+                     .expect("create");
     // add steps
     let mut expected = 0i64;
     for i in 1..=5 {
-        let fd = FlowData { id: Uuid::new_v4(), flow_id: parent, cursor: i, key: "Step".into(), payload: json!({"v": i}), metadata: json!({"m": i}), command_id: None, created_at: Utc::now() };
+        let fd = FlowData { id: Uuid::new_v4(),
+                            flow_id: parent,
+                            cursor: i,
+                            key: "Step".into(),
+                            payload: json!({"v": i}),
+                            metadata: json!({"m": i}),
+                            command_id: None,
+                            created_at: Utc::now() };
         match repo.persist_data(&fd, expected).expect("persist") {
             flow::domain::PersistResult::Ok { new_version } => expected = new_version,
             _ => panic!("persist failed"),
         }
     }
     // create child clone
-    let child = repo.create_branch(&parent, Some("child-sql".into()), None, 5, json!({})).expect("branch");
+    let child = repo.create_branch(&parent, Some("child-sql".into()), None, 5, json!({}))
+                    .expect("branch");
     #[cfg(not(feature = "pg"))]
     assert_eq!(repo.count_steps(&child).unwrap(), 5);
 

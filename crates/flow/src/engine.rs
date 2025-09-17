@@ -160,12 +160,12 @@ impl<R> FlowEngine<R> where R: FlowRepository
     /// `metadata`. El repositorio generará el nuevo id y copiará los datos
     /// necesarios.
     pub fn new_branch(&self,
-                         parent_flow_id: &Uuid,
-                         name: Option<String>,
-                         status: Option<String>,
-                         parent_cursor: i64,
-                         metadata: serde_json::Value)
-                         -> Result<Uuid> {
+                      parent_flow_id: &Uuid,
+                      name: Option<String>,
+                      status: Option<String>,
+                      parent_cursor: i64,
+                      metadata: serde_json::Value)
+                      -> Result<Uuid> {
         self.repo.create_branch(parent_flow_id, name, status, parent_cursor, metadata)
     }
     /// Persiste un FlowData usando el repositorio y el control optimista de
