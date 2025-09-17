@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS snapshots;
+DROP TABLE IF EXISTS flow_data;
+DROP TABLE IF EXISTS flows;

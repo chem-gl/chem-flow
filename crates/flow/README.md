@@ -49,7 +49,7 @@ classDiagram
         +create_flow(name,status,metadata)
         +persist_data(data, expected_version)
         +read_data(flow_id, from_cursor)
-        +create_branch(parent_flow_id, name, status, parent_cursor, metadata)
+        +new_branch(parent_flow_id, name, status, parent_cursor, metadata)
         +delete_branch(flow_id)
         +delete_from_step(flow_id, from_cursor)
     }
@@ -117,4 +117,3 @@ Contribuciones y siguientes pasos
 - Añadir una implementación productiva `PostgresFlowRepository`.
 - Mejorar el modelo de snapshots (copias copy-on-write para artifacts).
 - Añadir más ejemplos y pruebas que simulen concurrencia.
-

@@ -1,7 +1,7 @@
 rdkit
 numpy>=1.25
 pandas>=2.1
-rdkit
-mypy
+rdkit >=2023.9.1
+mypy >=1.3
 flake8
-ty
+typing-extensions >=4.5.0

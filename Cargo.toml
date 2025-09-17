@@ -3,7 +3,6 @@ name = "chemflow-rust"
 version = "0.1.0"
 edition.workspace = true
 
-
 [workspace.package]
 edition = "2021"
 
@@ -24,6 +23,7 @@ sha2 = "0.10"
 chem-domain = { path = "crates/chem-domain" }
 flow = { path = "crates/flow" }
 chem-persistence = { path = "crates/chem-persistence" }
+postgres = "0.19"
 
 
 [dev-dependencies]
@@ -48,6 +48,9 @@ members = [
 pyo3 = { git = "https://github.com/PyO3/pyo3", tag = "v0.26.0" }
 
 [features]
-default = []
+# Enable Postgres demo by default so the default `main-core` binary
+# is compiled to use Postgres. Production builds that don't want Postgres
+# can opt out or the feature can be removed in CI as needed.
+default = ["pg_demo"]
 # Habilita el ejemplo de persistencia en Postgres desde main.rs
-pg_demo = []
+pg_demo = ["chem-persistence/pg"]

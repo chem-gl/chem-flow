@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${DATABASE_USER:-admin}
+      POSTGRES_PASSWORD: ${DATABASE_PASS:-admin123}
+      POSTGRES_DB: ${DATABASE_NAME:-mydatabase}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DATABASE_USER:-admin} -d ${DATABASE_NAME:-mydatabase}",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        FEATURES: "pg_demo"
+    # Restart only on non-zero exits to avoid restart loops when the
+    # process exits successfully. Use `unless-stopped` for long-running
+    # production services that should restart after host reboot.
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      PYO3_PYTHON: ${PYO3_PYTHON:-/opt/conda/bin/python}
+      PYTHON_SYS_EXECUTABLE: ${PYTHON_SYS_EXECUTABLE:-/opt/conda/bin/python}
+      LD_LIBRARY_PATH: ${LD_LIBRARY_PATH:-/opt/conda/lib}
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./crates/chem-providers/python:/app/python:ro
+      - ./crates/chem-providers/requirements.txt:/app/requirements.txt:ro
+    # Production container should not bind-mount the whole workspace (keeps image reproducible)
+
+  app-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+      args:
+        FEATURES: "pg_demo"
+    tty: true
+    stdin_open: true
+    env_file:
+      - .env
+    environment:
+      PYO3_PYTHON: ${PYO3_PYTHON:-/opt/conda/bin/python}
+      PYTHON_SYS_EXECUTABLE: ${PYTHON_SYS_EXECUTABLE:-/opt/conda/bin/python}
+      LD_LIBRARY_PATH: ${LD_LIBRARY_PATH:-/opt/conda/lib}
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/workspace:delegated
+      - cargo_target:/workspace/target
+    command: ["/bin/bash", "-c", "while true; do sleep 86400; done"]
+    # use the base stage which contains rustup/cargo so you can run cargo test inside the container
+volumes:
+  db_data:
+  cargo_target:
