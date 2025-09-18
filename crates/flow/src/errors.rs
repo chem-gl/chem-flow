@@ -12,19 +12,19 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum FlowError {
     /// Entidad no encontrada (por ejemplo, flow o snapshot).
-    #[error("Not found: {0}")]
+    #[error("No encontrado: {0}")]
     NotFound(String),
 
     /// Conflicto optimista (version/expected mismatch).
-    #[error("Conflict: {0}")]
+    #[error("Conflicto: {0}")]
     Conflict(String),
 
     /// Error genérico de almacenamiento (BD, S3, etc.).
-    #[error("Storage error: {0}")]
+    #[error("Error de almacenamiento: {0}")]
     Storage(String),
 
     /// Otro tipo de error.
-    #[error("Other: {0}")]
+    #[error("Otro: {0}")]
     Other(String),
 }
 

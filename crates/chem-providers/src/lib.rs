@@ -11,6 +11,7 @@ pub enum EngineError {
     GetMolecule(PyErr),
 }
 
+/// Motor químico que proporciona acceso a funcionalidades de RDKit vía Python
 pub struct ChemEngine {
     _private: (),
 }

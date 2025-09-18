@@ -11,13 +11,21 @@ use uuid::Uuid;
 /// almacenadas.
 #[derive(Debug, Clone)]
 pub struct FamilyProperty<'a, ValueType, TypeMeta> {
+    /// Identificador único de la propiedad
     id: Uuid,
+    /// Referencia a la familia molecular asociada
     family: &'a MoleculeFamily,
+    /// Tipo de propiedad (ej: "average_logP", "diversity_index")
     property_type: String,
+    /// Valor de la propiedad
     value: ValueType,
+    /// Calidad o confianza de la propiedad (opcional)
     quality: Option<String>,
+    /// Indica si esta es la propiedad preferida entre varias del mismo tipo
     preferred: bool,
+    /// Hash único que identifica esta propiedad específica
     value_hash: String,
+    /// Metadatos específicos del tipo de propiedad
     metadata: TypeMeta,
 }
 

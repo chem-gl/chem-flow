@@ -13,7 +13,8 @@ Contenido principal
   (crear flujo, añadir pasos, crear ramas, snapshots, etc.).
 - Tipos de dominio: `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult`.
 
-Quick start
+
+Inicio rápido
 
 1. Desde la raíz del workspace, ejecutar el ejemplo de uso en memoria:
 

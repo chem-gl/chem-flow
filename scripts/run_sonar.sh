@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# run_sonar.sh — improved helper to run SonarScanner for this repo
-# Usage examples:
-#   SONAR_TOKEN="<token>" ./scripts/run_sonar.sh            # uses defaults, runs build/test
+# run_sonar.sh — ayuda mejorada para ejecutar SonarScanner en este repositorio
+# Ejemplos de uso:
+#   SONAR_TOKEN="<token>" ./scripts/run_sonar.sh            # usa valores por defecto y ejecuta build/test
 #   SONAR_TOKEN="<token>" ./scripts/run_sonar.sh --skip-build --host http://host:9000
-#   ./scripts/run_sonar.sh --token-arg --skip-build          # prompts for token interactively
+#   ./scripts/run_sonar.sh --token-arg --skip-build          # solicita el token interactivamente
 #
-# IMPORTANT: Never commit tokens to source. Provide via SONAR_TOKEN env var or --token-arg.
+# IMPORTANTE: Nunca subas tokens al repositorio. Proporciona el token mediante la
+# variable de entorno SONAR_TOKEN o usa --token-arg para introducirlo en runtime.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -60,25 +61,25 @@ elif [[ $TOKEN_FROM_ARG -eq 1 ]]; then
   read -rp "Paste Sonar token (input will be hidden): " -s TOKEN
   echo
 else
-  echo "Error: SONAR_TOKEN is not set. Either set SONAR_TOKEN env var or run with --token-arg to input it interactively." >&2
+  echo "Error: SONAR_TOKEN no está configurada. Establece la variable SONAR_TOKEN o ejecuta con --token-arg para introducirla interactivamente." >&2
   exit 2
 fi
 
 # Security reminder
 cat <<'WARN'
-WARNING: Do not commit tokens into the repository or paste them into public chats.
-If the token you used was exposed, revoke it immediately and create a new one.
+ADVERTENCIA: No comites tokens en el repositorio ni los pegues en chats públicos.
+Si el token fue expuesto, revócalo inmediatamente y genera uno nuevo.
 WARN
 
 # Optional build/test
 if [[ $SKIP_BUILD -eq 0 ]]; then
   echo "Running build & tests"
-  if command -v cargo >/dev/null 2>&1; then
+    if command -v cargo >/dev/null 2>&1; then
     cargo fmt --all -- --check || true
     cargo build --workspace --verbose
     cargo test --workspace --verbose
   else
-    echo "cargo not found; skipping build/test checks"
+    echo "cargo no encontrado; se omiten comprobaciones de build/test" >&2
   fi
 else
   echo "Skipping build/tests as requested (--skip-build)"
@@ -110,8 +111,8 @@ if [[ $FORCE_DOWNLOAD -eq 1 || ! -x "${SCANNER_DIR}/bin/sonar-scanner" ]]; then
 fi
 
 SCANNER_BIN="$REPO_ROOT/${SCANNER_DIR}/bin/sonar-scanner"
-if [[ ! -x "$SCANNER_BIN" ]]; then
-  echo "sonar-scanner not found at $SCANNER_BIN" >&2
+  if [[ ! -x "$SCANNER_BIN" ]]; then
+  echo "sonar-scanner no encontrado en $SCANNER_BIN" >&2
   exit 2
 fi
 
@@ -125,7 +126,7 @@ PREFERRED_GENERIC="$REPO_ROOT/coverage/sonar-generic-coverage.xml"
 if [[ -n "$COVERAGE_PATH" && -f "$COVERAGE_PATH" ]]; then
   echo "Found coverage at $COVERAGE_PATH"
 else
-  echo "Note: no coverage chosen yet. We'll search for available reports in coverage/." >&2
+  echo "Nota: aún no se eligió reporte de cobertura. Buscaremos informes disponibles en coverage/." >&2
 fi
 
 # Prefer Cobertura XML if present (Sonar Generic Coverage importer expects XML).
@@ -143,7 +144,7 @@ else
   # No XML; attempt to convert lcov to cobertura.xml when python3 is available
   if [[ -f "$DEFAULT_LCOV" ]]; then
     if command -v python3 >/dev/null 2>&1; then
-      echo "No Cobertura XML found — attempting to convert coverage/lcov.info -> coverage/cobertura.xml using python3"
+      echo "No se encontró Cobertura XML — intentando convertir coverage/lcov.info -> coverage/cobertura.xml usando python3"
       set +e
       python3 - <<'PY'
 import os,sys,xml.etree.ElementTree as ET,time
@@ -197,9 +198,9 @@ PY
       set -e
       if [[ $CONV_EXIT -eq 0 && -f "$REPO_ROOT/coverage/cobertura.xml" ]]; then
         COVERAGE_PATH="$REPO_ROOT/coverage/cobertura.xml"
-        echo "Converted LCOV -> Cobertura at coverage/cobertura.xml"
+        echo "LCOV convertido a Cobertura: coverage/cobertura.xml"
       else
-        echo "Conversion failed (exit=$CONV_EXIT) or cobertura.xml not produced. Sonar may not import LCOV directly." >&2
+        echo "La conversión falló (exit=$CONV_EXIT) o no se produjo cobertura.xml. Sonar podría no importar LCOV directamente." >&2
       fi
     else
       echo "python3 not available; cannot auto-convert lcov.info to Cobertura XML. Run './scripts/generate_coverage.sh' to produce XML or install a converter." >&2
@@ -215,7 +216,7 @@ echo "Running sonar-scanner against host: $HOST (projectKey: $PROJECT_KEY)"
 # when possible to avoid "Unknown report version" parsing errors.
 if [[ "$COVERAGE_PATH" == *.xml && -f "$COVERAGE_PATH" ]]; then
   if command -v python3 >/dev/null 2>&1; then
-    echo "Converting coverage XML ($COVERAGE_PATH) -> Sonar generic coverage (coverage/sonar-generic-coverage.xml)"
+  echo "Convirtiendo XML de cobertura ($COVERAGE_PATH) -> Sonar generic coverage (coverage/sonar-generic-coverage.xml)"
     set +e
     # Export the input path so the embedded Python can read it reliably
     export COV_IN="$COVERAGE_PATH"
@@ -286,10 +287,10 @@ PY
     COVERAGE_PATH="$REPO_ROOT/coverage/sonar-generic-coverage.xml"
     echo "Using converted Sonar generic coverage: $COVERAGE_PATH"
   else
-    echo "Coverage XML conversion failed (exit=$CONV_EXIT). Continuing with original file: $COVERAGE_PATH" >&2
+    echo "La conversión de XML de cobertura falló (exit=$CONV_EXIT). Continuando con el archivo original: $COVERAGE_PATH" >&2
   fi
   else
-  echo "python3 not available; cannot convert Cobertura XML to Sonar generic format. Sonar may reject the report." >&2
+  echo "python3 no disponible; no se puede convertir Cobertura XML a formato Sonar generic. Sonar puede rechazar el reporte." >&2
   fi
 fi
 
@@ -337,10 +338,10 @@ if [[ $USE_DOCKER_FALLBACK -eq 0 ]]; then
   else
     JAVA_CMD="$(which java || true)"
     if [[ -z "$JAVA_CMD" ]]; then
-      echo "java not found in PATH; cannot run scanner jar" >&2
+      echo "java no encontrado en PATH; no se puede ejecutar el jar del scanner" >&2
       SCANNER_EXIT=1
     else
-      echo "Running scanner CLI jar directly with $JAVA_CMD"
+      echo "Ejecutando el jar del scanner directamente con $JAVA_CMD"
       "$JAVA_CMD" -Djava.awt.headless=true \
         -classpath "$JAR_FILE" \
         -Dscanner.home="$REPO_ROOT/${SCANNER_DIR}" \
@@ -356,7 +357,7 @@ if [[ $USE_DOCKER_FALLBACK -eq 0 ]]; then
   fi
   # Optionally restore the renamed JRE (we leave it disabled to avoid re-triggering the issue)
   if [[ -n "$RENAMED_JRE_DIR" && -d "$RENAMED_JRE_DIR" ]]; then
-    echo "Note: bundled scanner JRE moved to $RENAMED_JRE_DIR" >&2
+    echo "Nota: JRE embebido del scanner movido a $RENAMED_JRE_DIR" >&2
   fi
 else
   # Ensure Docker is available
@@ -366,7 +367,7 @@ else
   fi
 
   DOCKER_IMAGE="sonarsource/sonar-scanner-cli:4.8.0.2856"
-  echo "Running sonar-scanner via Docker image: $DOCKER_IMAGE"
+  echo "Ejecutando sonar-scanner vía imagen Docker: $DOCKER_IMAGE"
   docker run --rm -v "$REPO_ROOT":/usr/src -w /usr/src "$DOCKER_IMAGE" \
     -Dsonar.projectKey="$PROJECT_KEY" \
     -Dsonar.sources=crates,src \
@@ -378,12 +379,12 @@ fi
 set -e
 
 if [[ $SCANNER_EXIT -ne 0 ]]; then
-  echo "sonar-scanner failed with exit code $SCANNER_EXIT" >&2
-  echo "If you see a Java class version error, install Java 17+ locally (e.g. 'sudo apt install openjdk-17-jdk') or ensure Docker is available for fallback runs." >&2
+  echo "sonar-scanner falló con código de salida $SCANNER_EXIT" >&2
+  echo "Si aparece un error de versión de clases Java, instala Java 17+ localmente (ej. 'sudo apt install openjdk-17-jdk') o asegúrate de que Docker esté disponible." >&2
   exit $SCANNER_EXIT
 fi
 
-echo "Sonar scan finished. Check $HOST for results (project key: $PROJECT_KEY)."
+# Escaneo Sonar finalizado. Revisa $HOST para ver resultados (project key: $PROJECT_KEY).
 
 # Unset token in current shell to avoid leaking into later commands
 unset TOKEN

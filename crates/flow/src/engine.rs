@@ -11,10 +11,13 @@ use chrono::Utc;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-/// Configuración simple del motor: con qué frecuencia generar snapshots.
+/// Configuración simple del motor.
+///
+/// Actualmente vacío: sirve como placeholder para futuras opciones
+/// (por ejemplo `snapshot_interval` o parámetros de rehidratación). Las
+/// snapshots se gestionan hoy manualmente mediante `save_snapshot`.
 pub struct FlowEngineConfig {
-    // Config currently empty; snapshots are managed manualmente vía
-    // `save_snapshot` y ramas se crean manualmente.
+    // Por ahora no contiene campos; se deja para expansión futura.
 }
 
 /// Motor de ejecución rehidratable y resumible.

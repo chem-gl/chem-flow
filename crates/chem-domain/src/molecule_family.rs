@@ -11,12 +11,19 @@ use uuid::Uuid;
 /// con propiedades estructurales o funcionales similares.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoleculeFamily {
+    /// Identificador único de la familia
     id: Uuid,
+    /// Nombre opcional de la familia
     name: Option<String>,
+    /// Descripción opcional de la familia
     description: Option<String>,
+    /// Hash único que identifica la composición de la familia
     family_hash: String,
+    /// Metadatos sobre el origen y creación de la familia
     provenance: serde_json::Value,
+    /// Indica si la familia está congelada (inmutable)
     frozen: bool,
+    /// Lista de moléculas que conforman la familia
     molecules: Vec<Molecule>,
 }
 

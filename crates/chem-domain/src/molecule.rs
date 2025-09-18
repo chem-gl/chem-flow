@@ -14,9 +14,13 @@ static ENGINE: Lazy<Result<ChemEngine, DomainError>> = Lazy::new(|| {
 /// Representa una molécula química con sus identificadores únicos y metadatos
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Molecule {
+    /// Identificador único InChIKey de la molécula
     inchikey: String,
+    /// Representación SMILES de la molécula
     smiles: String,
+    /// Representación InChI de la molécula
     inchi: String,
+    /// Metadatos adicionales en formato JSON
     metadata: serde_json::Value,
 }
 

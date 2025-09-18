@@ -8,8 +8,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize concrete repo and wrap in a trait object so main only
-    // depends on the `FlowRepository` contract.
+    // Inicializar repositorio concreto y envolver en objeto trait para que main
+    // solo dependa del contrato `FlowRepository`.
     let concrete = chem_persistence::new_from_env().map_err(|e| Box::new(e) as Box<dyn Error>)?;
     let repo: Arc<dyn FlowRepository> = Arc::new(concrete);
 
@@ -65,8 +65,6 @@ fn prompt(msg: &str) -> io::Result<String> {
     io::stdin().read_line(&mut s)?;
     Ok(s)
 }
-
-// ...existing code reused from src/example-main.rs ...
 
 type FlowEntry = (Uuid, Option<Uuid>, Option<String>, Option<String>);
 

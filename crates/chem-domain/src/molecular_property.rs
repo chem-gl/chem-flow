@@ -9,13 +9,21 @@ use uuid::Uuid;
 /// de integridad mediante hash. Es genérica en el tipo de valor y metadatos.
 #[derive(Debug, Clone)]
 pub struct MolecularProperty<'a, TypeValue, TypeMetaData> {
+    /// Identificador único de la propiedad
     id: Uuid,
+    /// Referencia a la molécula asociada
     molecule: &'a Molecule,
+    /// Tipo de propiedad (ej: "logP", "polar_surface_area")
     property_type: String,
+    /// Valor de la propiedad
     value: TypeValue,
+    /// Calidad o confianza de la propiedad (opcional)
     quality: Option<String>,
+    /// Indica si esta es la propiedad preferida entre varias del mismo tipo
     preferred: bool,
+    /// Hash único que identifica esta propiedad específica
     value_hash: String,
+    /// Metadatos específicos del tipo de propiedad
     metadata: TypeMetaData,
 }
 

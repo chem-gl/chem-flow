@@ -43,6 +43,7 @@ type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 /// Repositorio mínimo usando Diesel; en producción puede usar Postgres.
 /// Los helpers para SQLite se compilan sólo en pruebas.
 pub struct DieselFlowRepository {
+    /// Pool de conexiones a la base de datos
     pool: Arc<DbPool>,
 }
 

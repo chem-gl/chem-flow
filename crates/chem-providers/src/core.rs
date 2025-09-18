@@ -25,12 +25,19 @@ fn get_module(py: Python<'_>) -> PyResult<Py<PyModule>> {
 }
 
 #[derive(Debug, Deserialize)]
+/// Representa una molécula obtenida desde RDKit con propiedades básicas
 pub struct Molecule {
+    /// Representación SMILES de la molécula
     pub smiles: String,
+    /// Representación InChI de la molécula
     pub inchi: String,
+    /// Identificador único InChIKey
     pub inchikey: String,
+    /// Número de átomos en la molécula
     pub num_atoms: u32,
+    /// Peso molecular calculado
     pub mol_weight: f64,
+    /// Fórmula molecular
     pub mol_formula: String,
 }
 
@@ -42,7 +49,8 @@ pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
         let info = binding.downcast::<PyDict>()?;
         let json_str: String = py.import("json")?.call_method1("dumps", (info,))?.extract()?;
         let molecule: Molecule = serde_json::from_str(&json_str).map_err(|e| {
-                                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Deserialization error: {}", e))
+                                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Error de deserialización: {}",
+                                                                                             e))
                                  })?;
         Ok(molecule)
     })

@@ -8,9 +8,10 @@ use flow::domain::FlowData;
 use serde_json::json;
 use uuid::Uuid;
 
-// When the crate is built with the `pg` feature the test harness may still be
-// compiled as an integration test. Provide two `setup_repo` variants so the
-// correct constructor is used depending on the enabled feature.
+// Cuando el crate se compila con la feature `pg`, el harness de tests puede
+// seguir siendo compilado como test de integración. Proporcionar dos variantes
+// `setup_repo` para que se use el constructor correcto dependiendo de la
+// feature habilitada.
 #[cfg(not(feature = "pg"))]
 fn setup_repo() -> DieselFlowRepository {
     // Usar una base en memoria con nombre único por test para aislarlos
@@ -22,10 +23,10 @@ fn setup_repo() -> DieselFlowRepository {
 
 #[cfg(feature = "pg")]
 fn setup_repo() -> DieselFlowRepository {
-    // For `pg` feature builds, attempt to use the PG constructor. The test
-    // runner should set a real DATABASE_URL pointing to a test Postgres
-    // instance. If not set, `new_pg` will return an Err and the test will
-    // fail fast with a helpful message.
+    // Para builds con feature `pg`, intentar usar el constructor PG. El runner de
+    // tests debe establecer una DATABASE_URL real apuntando a una instancia de
+    // Postgres de test. Si no se establece, `new_pg` retornará un Err y el test
+    // fallará rápido con un mensaje útil.
     dotenvy::dotenv().ok();
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for pg tests");
     DieselFlowRepository::new_pg(&url).expect("create pg repo")
@@ -57,7 +58,7 @@ fn test_create_and_persist_flow_data_and_branching() {
     // read back
     let items = repo.read_data(&flow_id, 0).expect("read");
     assert_eq!(items.len(), 3);
-    // create branch at cursor 2
+    // crear rama en cursor 2
     let branch_id = repo.create_branch(&flow_id, Some("rama".into()), None, 2, json!({}))
                         .expect("branch");
     assert!(repo.branch_exists(&branch_id).unwrap());

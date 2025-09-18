@@ -1,4 +1,4 @@
-# Project Dockerfile: provides Python (RDKit via conda) and Rust toolchain, builds workspace
+# Dockerfile del proyecto: proporciona Python (RDKit vía conda) y el toolchain de Rust; compila el workspace
 FROM condaforge/mambaforge:latest AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -24,18 +24,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install RDKit via conda (conda-forge)
 RUN mamba install -y -c conda-forge "python=3.11" rdkit
 
-# Install rustup and Rust toolchain
+# Instala rustup y el toolchain de Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain stable && \
     /root/.cargo/bin/rustup default stable && \
     /root/.cargo/bin/rustup target add x86_64-unknown-linux-gnu || true
 
-# Add cargo bin to PATH
+# Añade el binario de cargo al PATH
 ENV PATH=/root/.cargo/bin:$PATH
 
-# Install nightly toolchain and cargo-tarpaulin to avoid runtime installs inside
-# the coverage container. cargo-tarpaulin historically requires nightly; installing
-# it in the image prevents `cargo install` from triggering rustup downloads at
-# container runtime.
+# Instala el toolchain nightly y `cargo-tarpaulin` para evitar instalaciones en
+# tiempo de ejecución dentro del contenedor de cobertura. `cargo-tarpaulin`
+# suele requerir nightly; instalarlo aquí evita que `cargo install` dispare
+# descargas de rustup en tiempo de ejecución.
 RUN /root/.cargo/bin/rustup toolchain install nightly || true && \
     /root/.cargo/bin/rustup run nightly /root/.cargo/bin/cargo install cargo-tarpaulin --locked || true
 
@@ -47,18 +47,17 @@ COPY crates/chem-persistence/Cargo.toml crates/chem-persistence/Cargo.toml
 COPY crates/chem-providers/Cargo.toml crates/chem-providers/Cargo.toml
 COPY crates/chem-providers/requirements.txt crates/chem-providers/requirements.txt
 
-# Pre-fetch cargo dependencies (useful to cache registry/git downloads)
+# Pre-descarga dependencias de cargo (útil para cachear descargas del registry/git)
 RUN cargo fetch || true
 
 # Instalar requirements de Python ahora que requirements.txt está presente
 RUN /opt/conda/bin/pip install --no-cache-dir -r crates/chem-providers/requirements.txt || true
 
-# NOTE: we separate the "base" stage (toolchain + deps) from the
-# "builder" stage (compilation). The `coverage-runner`/dev image should
-# use the `base` stage so we don't compile the workspace when building
-# the dev image (tarpaulin / tests will compile on-demand inside the
-# container). This preserves Docker layer cache for long-lived steps
-# like apt/mamba/rustup/cargo fetch.
+# Observación: separamos la etapa "base" (toolchain + dependencias) de la
+# etapa "builder" (compilación). La imagen de desarrollo/coverage debería
+# usar la etapa `base` para no compilar el workspace durante su construcción
+# (tarpaulin/tests compilarán bajo demanda dentro del contenedor). Esto
+# preserva la caché de Docker para pasos pesados como apt/mamba/rustup/cargo fetch.
 
 ## Builder stage (compilation) ------------------------------
 FROM base AS builder
@@ -79,7 +78,7 @@ RUN if [ -n "$FEATURES" ]; then \
             cargo build --release || cargo build; \
         fi
 
-# Final image: smaller runtime image
+# Imagen final: imagen de runtime más ligera
 FROM condaforge/mambaforge:latest
 ENV PYO3_PYTHON=/opt/conda/bin/python \
     PYTHON_SYS_EXECUTABLE=/opt/conda/bin/python \

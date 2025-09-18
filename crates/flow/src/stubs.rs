@@ -346,7 +346,7 @@ impl FlowRepository for InMemoryFlowRepository {
             entry.extend(copied);
         } else {
             // No hay pasos previos; esto es válido (branch vacío)
-            println!("[stub] no parent steps found for {}", parent_flow_id);
+            println!("[stub] no se encontraron pasos del padre para {}", parent_flow_id);
         }
 
         // Crear un registro `BranchCreated` como siguiente cursor para la
