@@ -1,4 +1,3 @@
-use chem_persistence;
 use chrono::Utc;
 use flow::domain::FlowData;
 use flow::repository::FlowRepository;
@@ -27,6 +26,7 @@ fn print_menu() {
     println!("6) Ver flujo completo (con pasos)");
     println!("7) Mostrar mapa simple de flujos");
     println!("9) Ver/actualizar status de un flow");
+    println!("10) Eliminar pasos a partir de un cursor (en una rama)");
     println!("8) Salir");
 }
 
@@ -46,6 +46,7 @@ fn run_cli(repo: Arc<dyn FlowRepository>) -> Result<(), Box<dyn Error>> {
             "5" => create_step_interactive(repo.as_ref())?,
             "6" => view_flow_full(repo.as_ref())?,
             "7" => print_flow_map(repo.as_ref())?,
+            "10" => delete_steps_from_cursor_interactive(repo.as_ref())?,
             "9" => view_update_status_interactive(repo.as_ref())?,
             "8" => {
                 println!("Saliendo...");
@@ -312,6 +313,49 @@ fn view_update_status_interactive(repo: &dyn FlowRepository) -> Result<(), Box<d
     match repo.set_flow_status(&fid, new_status) {
         Ok(meta) => println!("Status actualizado. Nuevo meta: id={} status={:?}", meta.id, meta.status),
         Err(e) => eprintln!("Error actualizando status: {}", e),
+    }
+    Ok(())
+}
+
+fn delete_steps_from_cursor_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
+    // List flows and let the user pick one
+    let (flows, data) = get_flows_and_data(repo)?;
+    if flows.is_empty() {
+        println!("No hay flujos disponibles");
+        return Ok(());
+    }
+    println!("Selecciona flow por número para eliminar pasos a partir de un cursor:");
+    for (i, (id, _parent, name, _status)) in flows.iter().enumerate() {
+        println!("[{}] {} name={:?}", i, id, name);
+    }
+    let sel = prompt("Número del flow: ")?;
+    let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
+    if idx >= flows.len() {
+        println!("Índice fuera de rango");
+        return Ok(());
+    }
+    let fid = flows[idx].0;
+
+    // Show steps for selected flow
+    let items: Vec<FlowData> = data.into_iter().filter(|d| d.flow_id == fid).collect();
+    if items.is_empty() {
+        println!("El flow no tiene pasos aún. No hay nada que eliminar.");
+        return Ok(());
+    }
+    println!("Pasos actuales (cursor | key):");
+    for it in &items {
+        println!("- {} | {}", it.cursor, it.key);
+    }
+    let cursor_s = prompt("Eliminar a partir de qué cursor? (entero, inclusive; puedes elegir 1): ")?;
+    let from_cursor: i64 = cursor_s.trim().parse().map_err(|_| "Cursor inválido")?;
+    if from_cursor < 1 {
+        println!("El cursor debe ser >= 1");
+        return Ok(());
+    }
+
+    match repo.delete_from_step(&fid, from_cursor) {
+        Ok(()) => println!("Pasos desde cursor {} eliminados (inclusive) en flow {}", from_cursor, fid),
+        Err(e) => eprintln!("Error eliminando pasos: {}", e),
     }
     Ok(())
 }
