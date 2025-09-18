@@ -43,3 +43,59 @@ diesel::table! {
 }
 
 allow_tables_to_appear_in_same_query!(flows, flow_data, snapshots);
+
+diesel::table! {
+    molecules (inchikey) {
+        inchikey -> Text,
+        smiles -> Text,
+        inchi -> Text,
+        metadata -> Text,
+    }
+}
+
+diesel::table! {
+    families (id) {
+        id -> Text,
+        name -> Nullable<Text>,
+        description -> Nullable<Text>,
+        family_hash -> Text,
+        provenance -> Text,
+        frozen -> Bool,
+    }
+}
+
+diesel::table! {
+    family_properties (id) {
+        id -> Text,
+        family_id -> Text,
+        property_type -> Text,
+        value -> Text,
+        quality -> Nullable<Text>,
+        preferred -> Bool,
+        value_hash -> Text,
+        metadata -> Text,
+    }
+}
+
+diesel::table! {
+    molecular_properties (id) {
+        id -> Text,
+        molecule_inchikey -> Text,
+        property_type -> Text,
+        value -> Text,
+        quality -> Nullable<Text>,
+        preferred -> Bool,
+        value_hash -> Text,
+        metadata -> Text,
+    }
+}
+
+diesel::table! {
+    family_members (id) {
+        id -> Text,
+        family_id -> Text,
+        molecule_inchikey -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(molecules, families, family_properties, molecular_properties, family_members);

@@ -33,22 +33,6 @@ impl<'a, ValueType, TypeMeta> FamilyProperty<'a, ValueType, TypeMeta>
     where ValueType: Serialize + Clone,
           TypeMeta: Serialize + Clone
 {
-    /// Crea una nueva propiedad de familia con validaciones exhaustivas
-    ///
-    /// # Argumentos
-    /// * `family` - Referencia a la familia molecular
-    /// * `property_type` - Tipo de propiedad (ej: "average_logP",
-    ///   "diversity_index")
-    /// * `value` - Valor de la propiedad
-    /// * `quality` - Calidad o confianza de la propiedad (opcional)
-    /// * `preferred` - Indica si esta es la propiedad preferida entre varias
-    ///   del mismo tipo
-    /// * `metadata` - Metadatos específicos del tipo de propiedad
-    ///
-    /// # Errores
-    /// Retorna `DomainError::ValidationError` si el tipo de propiedad está
-    /// vacío Retorna `DomainError::SerializationError` si hay errores al
-    /// serializar
     pub fn new(family: &'a MoleculeFamily,
                property_type: &str,
                value: ValueType,

@@ -55,6 +55,20 @@ pub trait DomainRepository: Send + Sync {
     fn save_molecular_property(&self, prop: OwnedMolecularProperty) -> Result<Uuid, DomainError>;
     /// Recupera propiedades moleculares por inchikey
     fn get_molecular_properties(&self, inchikey: &str) -> Result<Vec<OwnedMolecularProperty>, DomainError>;
+    /// Elimina una molécula del repositorio. No permite eliminar si la molécula
+    /// forma parte de alguna familia; en ese caso retorna ValidationError.
+    fn delete_molecule(&self, inchikey: &str) -> Result<(), DomainError>;
+
+    /// Elimina una familia (y sus propiedades y mapeos) del repositorio.
+    fn delete_family(&self, id: &Uuid) -> Result<(), DomainError>;
+
+    /// Agrega una molécula a una familia existente y persiste la nueva versión
+    /// retornando el nuevo `Uuid` de la familia.
+    fn add_molecule_to_family(&self, family_id: &Uuid, molecule: Molecule) -> Result<Uuid, DomainError>;
+
+    /// Remueve una molécula de una familia existente y persiste la nueva
+    /// versión retornando el nuevo `Uuid` de la familia.
+    fn remove_molecule_from_family(&self, family_id: &Uuid, inchikey: &str) -> Result<Uuid, DomainError>;
 }
 
 /// Implementación en memoria para tests y desarrollo.
@@ -128,6 +142,49 @@ impl DomainRepository for InMemoryDomainRepository {
     fn get_molecular_properties(&self, inchikey: &str) -> Result<Vec<OwnedMolecularProperty>, DomainError> {
         let map = self.lock_map(&self.molecular_properties, "molecular_properties")?;
         Ok(map.values().filter(|p| p.molecule_inchikey == inchikey).cloned().collect())
+    }
+
+    fn delete_molecule(&self, inchikey: &str) -> Result<(), DomainError> {
+        // Check families
+        let families = self.lock_map(&self.families, "families")?;
+        for (_id, fam) in families.iter() {
+            if fam.contains(inchikey) {
+                return Err(DomainError::ValidationError(format!("No se puede eliminar la molécula {}; pertenece a una familia", inchikey)));
+            }
+        }
+        drop(families);
+        let mut molecules = self.lock_map(&self.molecules, "molecules")?;
+        molecules.remove(inchikey);
+        Ok(())
+    }
+
+    fn delete_family(&self, id: &Uuid) -> Result<(), DomainError> {
+        let mut families = self.lock_map(&self.families, "families")?;
+        families.remove(id);
+        // remove family properties
+        let mut fps = self.lock_map(&self.family_properties, "family_properties")?;
+        fps.retain(|_, v| &v.family_id != id);
+        Ok(())
+    }
+
+    fn add_molecule_to_family(&self, family_id: &Uuid, molecule: Molecule) -> Result<Uuid, DomainError> {
+        let fam_opt = self.get_family(family_id)?;
+        let fam = fam_opt.ok_or(DomainError::ValidationError("Familia no encontrada".to_string()))?;
+        let new_fam = fam.add_molecule(molecule)?;
+        self.save_family(new_fam)
+    }
+
+    fn remove_molecule_from_family(&self, family_id: &Uuid, inchikey: &str) -> Result<Uuid, DomainError> {
+        let fam_opt = self.get_family(family_id)?;
+        let fam = fam_opt.ok_or(DomainError::ValidationError("Familia no encontrada".to_string()))?;
+        let new_fam = fam.remove_molecule(inchikey)?;
+        self.save_family(new_fam)
+    }
+}
+
+impl Default for InMemoryDomainRepository {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

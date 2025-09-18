@@ -22,9 +22,20 @@ impl DomainStubs {
 
         let family = MoleculeFamily::new(vec![m1.clone(), m2.clone()], json!({"source": "stub"})).unwrap();
 
-        let _ = repo.save_molecule(m1);
-        let _ = repo.save_molecule(m2);
-        let _ = repo.save_family(family);
+        let _ = repo.save_molecule(m1.clone());
+        let _ = repo.save_molecule(m2.clone());
+        // Guardar la familia y así poblar el mapa interno de familias
+        let f_id = repo.save_family(family.clone()).unwrap();
+
+        // Asegurarse de que el mapping familia->moléculas exista (en memoria
+        // lo representamos con la familia misma). En el repo Diesel esto se
+        // persistirá en la tabla `family_members`.
+        let _ = f_id;
+
+        // Ejemplos de operaciones que pueden fallar/ser probadas:
+        // - repo.delete_molecule("some-inchikey") -> debe fallar si la molécula
+        //   pertenece a una familia
+        // - repo.delete_family(&f_id) -> elimina familia y propiedades
 
         repo
     }
