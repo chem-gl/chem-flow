@@ -68,17 +68,11 @@ jobs:
             -e HOST_CACHE_DIR="${{ github.workspace }}/.cache/flow" \
             flow-chem-ci-dev bash -lc 'set -euo pipefail; cargo test --workspace --verbose'
 
-      - name: Upload coverage report
+      - name: Upload coverage report (lcov only)
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: coverage
-
-      - name: Upload coverage HTML (if present)
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-html
-          path: coverage/html
+          path: coverage/lcov.info
 
       - name: List coverage files (for debug)
         run: |
