@@ -120,6 +120,58 @@ docker run --name "$CN" --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfi
 
     echo "[coverage/container] listado de coverage/"
     ls -la coverage || true
+  echo "[coverage/container] intentando convertir cobertura a Sonar generic format (coverage/sonar-generic-coverage.xml)"
+  # Convertir cobertura.xml (tarpaulin produces Cobertura-like XML) a Sonar Generic Coverage XML
+  if [ -f coverage/cobertura.xml ]; then
+    python3 - <<'PY'
+import os,sys,xml.etree.ElementTree as ET
+cov_in='coverage/cobertura.xml'
+out='coverage/sonar-generic-coverage.xml'
+if not os.path.exists(cov_in):
+  print('no cobertura found', file=sys.stderr); sys.exit(2)
+try:
+  tree = ET.parse(cov_in)
+  root = tree.getroot()
+except Exception as e:
+  print('parse error', e, file=sys.stderr); sys.exit(3)
+
+cov = ET.Element('coverage', {'version':'1'})
+
+def collect_lines(root):
+  lines_map = {}
+  # Find all <class> elements and their lines
+  for class_el in root.findall('.//class'):
+    filename = class_el.get('filename') or class_el.get('name')
+    if not filename:
+      continue
+    for lines_el in class_el.findall('.//lines'):
+      for line in lines_el.findall('line'):
+        num = line.get('number')
+        hits = line.get('hits') or line.get('count') or line.get('hit')
+        try:
+          covered = 'true' if int(hits or '0')>0 else 'false'
+        except Exception:
+          covered = 'false'
+        lines_map.setdefault(filename, {})[int(num)] = covered
+  return lines_map
+
+lines_map = collect_lines(root)
+if not lines_map:
+  # Try alternative shapes: some tarpaulin outputs use <lines><line number="..." hits="..."/></lines>
+  print('no lines found in cobertura; skipping conversion', file=sys.stderr)
+else:
+  for fname, lines in lines_map.items():
+    file_el = ET.SubElement(cov, 'file', {'path': fname})
+    for ln, covered in sorted(lines.items()):
+      ET.SubElement(file_el, 'lineToCover', {'lineNumber': str(ln), 'covered': covered})
+  ET.ElementTree(cov).write(out, encoding='utf-8', xml_declaration=True)
+  print(out)
+PY
+    echo "[coverage/container] listado de coverage/ tras conversión"
+    ls -la coverage || true
+  else
+    echo "[coverage/container] coverage/cobertura.xml no encontrado; no se generó sonar-generic-coverage.xml" || true
+  fi
   '
 
 # Al salir del docker run, el trap cleanup intentará eliminar el contenedor
