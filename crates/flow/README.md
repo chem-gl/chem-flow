@@ -82,6 +82,24 @@ Tests y validación
 cargo test -p flow
 ```
 
+Cómo ejecutar ejemplos y uso local
+
+- Ejecutar el ejemplo de uso en memoria (desde el crate):
+
+```bash
+cd crates/flow
+cargo run --example flow_simple_usage
+```
+
+- Ejecutar el ejemplo `flow_simple_usage` desde la raíz del workspace:
+
+```bash
+cargo run -p flow --example flow_simple_usage
+```
+
+- Notas de entorno: si algún ejemplo o test depende de `DATABASE_URL` u otras
+  variables, define esas variables en el entorno o usa un `.env` en la raíz.
+
 Contribuciones y siguientes pasos
 
 - Implementar `PostgresFlowRepository` (transaccional) y un `SnapshotStore`

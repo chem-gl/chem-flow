@@ -36,6 +36,7 @@ name = "main-core"
 path = "src/main.rs"
 
 
+
 [workspace]
 members = [
     "crates/chem-domain",
