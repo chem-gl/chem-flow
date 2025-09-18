@@ -1,40 +1,52 @@
-use chem_persistence::DieselFlowRepository;
+use chem_persistence;
 use chrono::Utc;
 use flow::domain::FlowData;
 use flow::repository::FlowRepository;
 use serde_json::json;
 use std::error::Error;
 use std::io::{self, Write};
+use std::sync::Arc;
 use uuid::Uuid;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let repo = chem_persistence::new_from_env().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    // Initialize concrete repo and wrap in a trait object so main only
+    // depends on the `FlowRepository` contract.
+    let concrete = chem_persistence::new_from_env().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    let repo: Arc<dyn FlowRepository> = Arc::new(concrete);
 
+    run_cli(repo)
+}
+
+fn print_menu() {
+    println!("\n== Flow CLI menu ==");
+    println!("1) Ver flujos (tabla con id y parent)");
+    println!("2) Crear flow");
+    println!("3) Crear branch (elige parent y cursor)");
+    println!("4) Eliminar flow (y subramas)");
+    println!("5) Crear paso (append) en un flow");
+    println!("6) Ver flujo completo (con pasos)");
+    println!("7) Mostrar mapa simple de flujos");
+    println!("9) Ver/actualizar status de un flow");
+    println!("8) Salir");
+}
+
+fn run_cli(repo: Arc<dyn FlowRepository>) -> Result<(), Box<dyn Error>> {
     loop {
-        println!("\n== Flow CLI menu ==");
-        println!("1) Ver flujos (tabla con id y parent)");
-        println!("2) Crear flow");
-        println!("3) Crear branch (elige parent y cursor)");
-        println!("4) Eliminar flow (y subramas)");
-        println!("5) Crear paso (append) en un flow");
-        println!("6) Ver flujo completo (con pasos)");
-        println!("7) Mostrar mapa simple de flujos");
-        println!("9) Ver/actualizar status de un flow");
-        println!("8) Salir");
+        print_menu();
         print!("Elige una opción: ");
         io::stdout().flush().ok();
 
         let mut choice = String::new();
         io::stdin().read_line(&mut choice)?;
         match choice.trim() {
-            "1" => print_flows_table(&repo),
-            "2" => create_flow_interactive(&repo)?,
-            "3" => create_branch_interactive(&repo)?,
-            "4" => delete_flow_interactive(&repo)?,
-            "5" => create_step_interactive(&repo)?,
-            "6" => view_flow_full(&repo)?,
-            "7" => print_flow_map(&repo)?,
-            "9" => view_update_status_interactive(&repo)?,
+            "1" => show_flows_interactive(repo.as_ref())?,
+            "2" => create_flow_interactive(repo.as_ref())?,
+            "3" => create_branch_interactive(repo.as_ref())?,
+            "4" => delete_flow_interactive(repo.as_ref())?,
+            "5" => create_step_interactive(repo.as_ref())?,
+            "6" => view_flow_full(repo.as_ref())?,
+            "7" => print_flow_map(repo.as_ref())?,
+            "9" => view_update_status_interactive(repo.as_ref())?,
             "8" => {
                 println!("Saliendo...");
                 break;
@@ -42,7 +54,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             other => println!("Opción inválida: {}", other),
         }
     }
-
     Ok(())
 }
 
@@ -54,22 +65,49 @@ fn prompt(msg: &str) -> io::Result<String> {
     Ok(s)
 }
 
-fn print_flows_table(repo: &DieselFlowRepository) {
-    match repo.dump_tables_for_debug() {
-        Ok((flows, _)) => {
-            println!("\nID                                   | PARENT                                 | NAME");
-            println!("-----------------------------------------------------------------------------------");
-            for f in flows {
-                let pid = f.parent_flow_id.map(|u| u.to_string()).unwrap_or_else(|| "-".into());
-                let name = f.name.unwrap_or_else(|| "<no-name>".into());
-                println!("{} | {} | {}", f.id, pid, name);
+// Lightweight alias for flow entries used by the CLI. We map the internal
+// repo struct into a small tuple so the CLI doesn't depend on internal
+// types beyond primitives (Uuid and Option<String>) and `FlowData`.
+type FlowEntry = (Uuid, Option<Uuid>, Option<String>, Option<String>);
+
+fn get_flows_and_data(repo: &dyn FlowRepository) -> Result<(Vec<FlowEntry>, Vec<FlowData>), Box<dyn Error>> {
+    let (flows, data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    let mapped: Vec<FlowEntry> = flows.into_iter()
+                                      .map(|f| (f.id, f.parent_flow_id, f.name, f.status))
+                                      .collect();
+    Ok((mapped, data))
+}
+
+fn show_flows_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
+    // Prefer the lightweight contract method first so implementations can
+    // optimize (e.g., selecting only ids). Then enrich using the debug dump
+    // helper which is implemented by all repositories.
+    match repo.list_flow_ids() {
+        Ok(ids) => {
+            println!("Flujos ({}):", ids.len());
+            if ids.is_empty() {
+                println!("(no hay registros)");
+                return Ok(());
             }
+            // Enrich with names/parents using the existing helper
+            let (flows, _data) = get_flows_and_data(repo)?;
+            println!("{:<40} {:<40} {:<20} {:<10}", "id", "parent", "name", "status");
+            for (id, parent, name, status) in flows {
+                let pid = parent.map(|u| u.to_string()).unwrap_or_else(|| "-".into());
+                let name_s = name.unwrap_or_else(|| "-".into());
+                let status_s = status.unwrap_or_else(|| "-".into());
+                println!("{:<40} {:<40} {:<20} {:<10}", id, pid, name_s, status_s);
+            }
+            Ok(())
         }
-        Err(e) => eprintln!("Error leyendo flujos: {}", e),
+        Err(e) => {
+            eprintln!("Error listando flujos: {}", e);
+            Err(Box::new(e) as Box<dyn Error>)
+        }
     }
 }
 
-fn create_flow_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+fn create_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
     let name = prompt("Nombre (enter para vacío): ")?;
     let status = prompt("Estado (enter para vacío): ")?;
     let name_opt = if name.trim().is_empty() {
@@ -89,15 +127,15 @@ fn create_flow_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-fn create_branch_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
-    let (flows, data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+fn create_branch_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
+    let (flows, data) = get_flows_and_data(repo)?;
     if flows.is_empty() {
         println!("No hay flujos disponibles");
         return Ok(());
     }
     println!("Selecciona parent por número:");
-    for (i, f) in flows.iter().enumerate() {
-        println!("[{}] {} name={:?}", i, f.id, f.name);
+    for (i, (id, _parent, name, _status)) in flows.iter().enumerate() {
+        println!("[{}] {} name={:?}", i, id, name);
     }
     let sel = prompt("Número del parent: ")?;
     let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
@@ -105,9 +143,9 @@ fn create_branch_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn 
         println!("Índice fuera de rango");
         return Ok(());
     }
-    let parent = &flows[idx];
+    let parent_id = flows[idx].0;
     // show steps
-    let items: Vec<FlowData> = data.into_iter().filter(|d| d.flow_id == parent.id).collect();
+    let items: Vec<FlowData> = data.into_iter().filter(|d| d.flow_id == parent_id).collect();
     if items.is_empty() {
         println!("El flow no tiene pasos aún. El cursor por defecto será 0");
     }
@@ -129,14 +167,14 @@ fn create_branch_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn 
     } else {
         Some(status.trim().to_string())
     };
-    match repo.create_branch(&parent.id, name_opt, status_opt, parent_cursor, json!({})) {
+    match repo.create_branch(&parent_id, name_opt, status_opt, parent_cursor, json!({})) {
         Ok(id) => println!("Branch creado: {}", id),
         Err(e) => eprintln!("Error creando branch: {}", e),
     }
     Ok(())
 }
 
-fn delete_flow_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+fn delete_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
     let id_s = prompt("Flow id a eliminar (UUID): ")?;
     let id = Uuid::parse_str(id_s.trim()).map_err(|_| "UUID inválido")?;
     let confirm = prompt(&format!("Confirma borrado de {}? escribir 'yes' para confirmar: ", id))?;
@@ -151,16 +189,16 @@ fn delete_flow_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-fn create_step_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+fn create_step_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
     // List flows so the user can choose by number (ergonomic)
-    let (flows, _data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    let (flows, _data) = get_flows_and_data(repo)?;
     if flows.is_empty() {
         println!("No hay flujos disponibles");
         return Ok(());
     }
     println!("Selecciona flow por número para crear el paso:");
-    for (i, f) in flows.iter().enumerate() {
-        println!("[{}] {} name={:?}", i, f.id, f.name);
+    for (i, (id, _parent, name, _status)) in flows.iter().enumerate() {
+        println!("[{}] {} name={:?}", i, id, name);
     }
     let sel = prompt("Número del flow: ")?;
     let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
@@ -168,7 +206,7 @@ fn create_step_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Er
         println!("Índice fuera de rango");
         return Ok(());
     }
-    let fid = flows[idx].id;
+    let fid = flows[idx].0;
     // Append-only: place the new step at the end of the flow
     let meta = repo.get_flow_meta(&fid).map_err(|e| Box::new(e) as Box<dyn Error>)?;
     let expected = meta.current_version;
@@ -199,16 +237,16 @@ fn create_step_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-fn view_flow_full(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+fn view_flow_full(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
     // List flows and let the user pick one by number (ergonomic)
-    let (flows, _data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    let (flows, _data) = get_flows_and_data(repo)?;
     if flows.is_empty() {
         println!("No hay flujos disponibles");
         return Ok(());
     }
     println!("Selecciona flow por número para ver completo:");
-    for (i, f) in flows.iter().enumerate() {
-        println!("[{}] {} name={:?}", i, f.id, f.name);
+    for (i, (id, _parent, name, _status)) in flows.iter().enumerate() {
+        println!("[{}] {} name={:?}", i, id, name);
     }
     let sel = prompt("Número del flow: ")?;
     let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
@@ -216,7 +254,7 @@ fn view_flow_full(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
         println!("Índice fuera de rango");
         return Ok(());
     }
-    let fid = flows[idx].id;
+    let fid = flows[idx].0;
     let meta = repo.get_flow_meta(&fid).map_err(|e| Box::new(e) as Box<dyn Error>)?;
     println!("Flow {} name={:?} parent={:?} cursor={} version={}",
              meta.id, meta.name, meta.parent_flow_id, meta.current_cursor, meta.current_version);
@@ -228,26 +266,26 @@ fn view_flow_full(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn print_flow_map(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
-    let (flows, _) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+fn print_flow_map(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
+    let (flows, _) = get_flows_and_data(repo)?;
     println!("Mapa simple de flujos (parent -> child):");
-    for f in &flows {
-        let pid = f.parent_flow_id.map(|u| u.to_string()).unwrap_or_else(|| "-".into());
-        println!("{} -> {}", pid, f.id);
+    for (id, parent, _name, _status) in &flows {
+        let pid = parent.map(|u| u.to_string()).unwrap_or_else(|| "-".into());
+        println!("{} -> {}", pid, id);
     }
     Ok(())
 }
 
-fn view_update_status_interactive(repo: &DieselFlowRepository) -> Result<(), Box<dyn Error>> {
+fn view_update_status_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
     // list flows
-    let (flows, _data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    let (flows, _data) = get_flows_and_data(repo)?;
     if flows.is_empty() {
         println!("No hay flujos disponibles");
         return Ok(());
     }
     println!("Selecciona flow por número para ver/actualizar status:");
-    for (i, f) in flows.iter().enumerate() {
-        println!("[{}] {} name={:?} status={:?}", i, f.id, f.name, f.status);
+    for (i, (id, _parent, name, status)) in flows.iter().enumerate() {
+        println!("[{}] {} name={:?} status={:?}", i, id, name, status);
     }
     let sel = prompt("Número del flow: ")?;
     let idx: usize = sel.trim().parse().map_err(|_| "Índice inválido")?;
@@ -255,7 +293,7 @@ fn view_update_status_interactive(repo: &DieselFlowRepository) -> Result<(), Box
         println!("Índice fuera de rango");
         return Ok(());
     }
-    let fid = flows[idx].id;
+    let fid = flows[idx].0;
     // get current status via repo
     match repo.get_flow_status(&fid) {
         Ok(cur) => println!("Status actual: {:?}", cur),

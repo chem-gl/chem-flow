@@ -2,6 +2,7 @@ use flow::engine::FlowEngineConfig;
 use flow::errors::FlowError;
 use flow::stubs::InMemoryFlowRepository;
 use flow::FlowEngine;
+use flow::FlowRepository;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -86,6 +87,13 @@ fn main() -> Result<(), FlowError> {
     // Leer datos finales del flujo original
     let items = engine.get_items(&flow_id, 0)?;
     println!("items: {:?}", items);
+
+    // Mostrar todos los ids de flujos usando la nueva función del repositorio
+    let all_ids = repo.list_flow_ids();
+    match all_ids {
+        Ok(ids) => println!("all flow ids: {:?}", ids),
+        Err(e) => println!("failed to list flow ids: {:?}", e),
+    }
 
     // --- Ejemplo: crear y eliminar una rama completa ---
     let temp_branch = engine.new_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({}))?;

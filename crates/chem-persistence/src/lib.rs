@@ -46,42 +46,7 @@ pub struct DieselFlowRepository {
     pool: Arc<DbPool>,
 }
 
-impl DieselFlowRepository {
-    /// Devuelve todos los rows de `flows` y `flow_data` para debug/inspección.
-    /// Retorna (flows, flow_data) serializados en tipos de dominio.
-    pub fn dump_tables_for_debug(&self) -> FlowResult<(Vec<FlowMeta>, Vec<FlowData>)> {
-        let mut conn = self.conn()?;
-        // flows
-        let frows = map_db_err(flows_dsl::flows.load::<FlowRow>(&mut conn))?;
-        let mut flows_out = Vec::new();
-        for r in frows {
-            flows_out.push(FlowMeta { id: Uuid::parse_str(&r.id).unwrap(),
-                                      name: r.name,
-                                      status: r.status,
-                                      created_by: r.created_by,
-                                      created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()),
-                                      current_cursor: r.current_cursor,
-                                      current_version: r.current_version,
-                                      parent_flow_id: r.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                                      parent_cursor: r.parent_cursor,
-                                      metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})) });
-        }
-        // flow_data
-        let drows = map_db_err(data_dsl::flow_data.load::<FlowDataRow>(&mut conn))?;
-        let mut data_out = Vec::new();
-        for r in drows {
-            data_out.push(FlowData { id: Uuid::parse_str(&r.id).unwrap(),
-                                     flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
-                                     cursor: r.cursor,
-                                     key: r.key,
-                                     payload: serde_json::from_str(&r.payload).unwrap_or(serde_json::json!({})),
-                                     metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
-                                     command_id: r.command_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                                     created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) });
-        }
-        Ok((flows_out, data_out))
-    }
-}
+impl DieselFlowRepository {}
 
 #[derive(Debug, Queryable, Insertable)]
 #[diesel(table_name = flows)]
@@ -264,6 +229,39 @@ impl FlowRepository for DieselFlowRepository {
                       parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
                       parent_cursor: row.parent_cursor,
                       metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})) })
+    }
+
+    fn dump_tables_for_debug(&self) -> FlowResult<(Vec<FlowMeta>, Vec<FlowData>)> {
+        let mut conn = self.conn()?;
+        // flows
+        let frows = map_db_err(flows_dsl::flows.load::<FlowRow>(&mut conn))?;
+        let mut flows_out = Vec::new();
+        for r in frows {
+            flows_out.push(FlowMeta { id: Uuid::parse_str(&r.id).unwrap(),
+                                      name: r.name,
+                                      status: r.status,
+                                      created_by: r.created_by,
+                                      created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()),
+                                      current_cursor: r.current_cursor,
+                                      current_version: r.current_version,
+                                      parent_flow_id: r.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
+                                      parent_cursor: r.parent_cursor,
+                                      metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})) });
+        }
+        // flow_data
+        let drows = map_db_err(data_dsl::flow_data.load::<FlowDataRow>(&mut conn))?;
+        let mut data_out = Vec::new();
+        for r in drows {
+            data_out.push(FlowData { id: Uuid::parse_str(&r.id).unwrap(),
+                                     flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
+                                     cursor: r.cursor,
+                                     key: r.key,
+                                     payload: serde_json::from_str(&r.payload).unwrap_or(serde_json::json!({})),
+                                     metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
+                                     command_id: r.command_id.and_then(|s| Uuid::parse_str(&s).ok()),
+                                     created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) });
+        }
+        Ok((flows_out, data_out))
     }
 
     fn create_flow(&self, name_in: Option<String>, status_in: Option<String>, metadata_in: JsonValue) -> FlowResult<Uuid> {
@@ -506,6 +504,19 @@ impl FlowRepository for DieselFlowRepository {
                                                    .count()
                                                    .get_result(&mut conn))?;
         Ok(c)
+    }
+
+    fn list_flow_ids(&self) -> FlowResult<Vec<Uuid>> {
+        use schema::flows::dsl::*;
+        let mut conn = self.conn()?;
+        let rows = map_db_err(flows.select(id).load::<String>(&mut conn))?;
+        let mut out = Vec::new();
+        for s in rows {
+            if let Ok(u) = Uuid::parse_str(&s) {
+                out.push(u);
+            }
+        }
+        Ok(out)
     }
 
     fn delete_branch(&self, flow_id: &Uuid) -> FlowResult<()> {

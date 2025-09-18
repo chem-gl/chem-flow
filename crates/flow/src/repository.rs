@@ -90,6 +90,20 @@ pub trait FlowRepository: Send + Sync {
     /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se
     /// actualizó correctamente.
     fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta>;
+
+    /// Devuelve los ids (UUID) de todos los flujos persistidos.
+    ///
+    /// Útil para inspección y para desacoplar lógica que quiera enumerar
+    /// flujos sin conocer la implementación interna del repositorio.
+    fn list_flow_ids(&self) -> Result<Vec<Uuid>>;
+
+    /// Helper de depuración: devuelve una copia de las tablas `flows` y
+    /// `flow_data` en tipos de dominio. Pensado sólo para uso CLI/tests.
+    ///
+    /// No es obligatorio para implementaciones productivas, pero es
+    /// conveniente para ejemplos y debugging local. Implementaciones
+    /// deben devolver pares (Vec<FlowMeta>, Vec<FlowData>).
+    fn dump_tables_for_debug(&self) -> Result<(Vec<FlowMeta>, Vec<FlowData>)>;
 }
 
 // Store traits para separar implementaciones de bajo nivel.

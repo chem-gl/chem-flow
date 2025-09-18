@@ -383,6 +383,22 @@ impl FlowRepository for InMemoryFlowRepository {
         Ok(None)
     }
 
+    /// Devuelve una copia de las tablas en memoria para debugging.
+    fn dump_tables_for_debug(&self) -> Result<(Vec<FlowMeta>, Vec<FlowData>)> {
+        let flows = self.lock(&self.flows)?;
+        let mut flows_out: Vec<FlowMeta> = flows.values().cloned().collect();
+        // Sort by created_at for deterministic output
+        flows_out.sort_by_key(|f| f.created_at);
+        let steps = self.lock(&self.steps)?;
+        let mut data_out: Vec<FlowData> = Vec::new();
+        for v in steps.values() {
+            for d in v.iter() {
+                data_out.push(d.clone());
+            }
+        }
+        Ok((flows_out, data_out))
+    }
+
     /// Verifica si existe una rama/flow con el id dado.
     fn branch_exists(&self, flow_id: &Uuid) -> Result<bool> {
         let flows = self.lock(&self.flows)?;
@@ -422,6 +438,12 @@ impl FlowRepository for InMemoryFlowRepository {
                        .map(|v| v.iter().filter(|d| d.cursor <= current_cursor).count() as i64)
                        .unwrap_or(0);
         Ok(cnt)
+    }
+
+    /// Lista todos los UUIDs de los flujos en memoria.
+    fn list_flow_ids(&self) -> Result<Vec<Uuid>> {
+        let flows = self.lock(&self.flows)?;
+        Ok(flows.keys().cloned().collect())
     }
 
     /// Elimina una rama pero NO borra sus hijos.
