@@ -36,3 +36,19 @@ Buenas prácticas
   para facilitar su uso por desarrolladores hispanohablantes.
 - Añadir ejemplos y tests al ampliar tipos o introducir operaciones costosas
   (p. ej. cálculo de propiedades).
+### 3.1 Class Diagram (Dominio Puro)
+
+```mermaid
+classDiagram
+class Molecule { +inchikey: String +smiles: String +inchi: String +metadata: Json }
+class MoleculeFamily { +id: UUID +ordered_keys: Vec<inchikey> +family_hash: String +provenance: Json +frozen: bool }
+class MolecularProperty { +id: UUID +molecule: inchikey +name: String +value: Json +units?: String +quality?: String +value_hash: String +preferred: bool }
+class FamilyAggregate { +id: UUID +family_id: UUID +aggregate_name: String +aggregate_value: Json +aggregate_hash: String +method: String }
+class FamilyPropertyProjection { <<computed>> +family_id +property_name +values[] +preferred }
+
+MoleculeFamily --> Molecule : contiene orden
+MolecularProperty --> Molecule : describe
+FamilyAggregate --> MoleculeFamily : deriva
+FamilyPropertyProjection --> MoleculeFamily : agrupa
+```
+
