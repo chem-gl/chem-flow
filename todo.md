@@ -38,56 +38,6 @@ Implicaciones para `chem-persistence` (migraciones / schema):
 - Opción robusta: añadir tablas `flow_molecules` y `flow_families` con columnas mínimas: `id, flow_id, cursor, entity_id, payload_json, created_at_ts`. Ventaja: consultas y joins eficientes, menos carga sobre `flow_data`.
 - Alternativa (artifact): implementar `ArtifactStore` en `chem-persistence` y usar `snapshots`/`artifacts` para blobs grandes; guardar `artifact_ptr` dentro de `flow_data.metadata`.
 
-Cambios sugeridos en API (pasos accionables):
-
-1. `crates/flow/src/domain.rs`:
-  - añadir `pub struct DomainObjects { molecules: Option<serde_json::Value>, families: Option<serde_json::Value> }` o, más simple, `pub domain_objects: Option<serde_json::Value>` dentro de `FlowData`.
-
-2. `crates/flow/src/repository.rs` (trait `FlowRepository`):
-  - documentar que `persist(...)` puede recibir `FlowData` con `domain_objects` y debe persistirlo según la política configurada.
-  - (opcional) extender la firma: `persist_with_domain(flow_id, expected_version, FlowData, Option<DomainObjects>) -> PersistResult` si se prefiere separar explícitamente.
-
-3. `crates/flow/src/stubs.rs` (InMemory):
-  - almacenar `domain_objects` en memoria junto con cada `FlowData` para tests.
-
-4. `crates/chem-persistence/`:
-  - decidir modo (inline / artifact / separate_tables) y añadir migración. Para empezar rápido recomendamos agregar la columna `domain_objects TEXT` (JSON) en la migración `00000000000001_create_schema/up.sql` y reflejarla en `schema.rs`.
-  - si se opta por tablas separadas, añadir migraciones para `flow_molecules` y `flow_families`.
-
-5. `crates/flow/src/engine.rs` (`FlowEngineConfig`): añadir opciones de configuración:
-  - `persist_domain_objects: bool` (default: false)
-  - `persist_domain_mode: String` enum-like ("inline" | "artifact" | "separate_tables")
-  - `domain_artifact_store: Option<Arc<dyn ArtifactStore>>` (si aplica)
-
-6. Ejemplos y tests:
-  - actualizar `crates/flow/examples/flow_simple_usage.rs` y `crates/chem-persistence/examples/persistence_simple_usage.rs` para mostrar cómo un paso incluye `molecules` o `families` en su payload y cómo se persisten según la configuración.
-  - añadir tests en `crates/flow/tests/` que verifiquen:
-    * persistencia inline: `flow_data` contiene `domain_objects` después de `persist`;
-    * persistencia artifact: `flow_data` contiene `artifact_ptr` y `ArtifactStore` devuelve el blob esperado;
-    * persistencia separate_tables: `flow_molecules` / `flow_families` contienen las entradas con `cursor` correcto.
-
-Mapping con `chem-domain`:
-
-- Cuando se persistan objetos de dominio, serializarlos usando los DTO/structs de `crates/chem-domain` (p. ej. `Molecule`, `MoleculeFamily`, `OwnedFamilyProperty`, `OwnedMolecularProperty`) vía serde. Esto evita duplicar formatos y permite reusar validación/métodos de los tipos existentes.
-- Al leer `domain_objects` durante `recovery`, deserializar a los tipos de `chem-domain` y aplicar al estado del flujo (por ejemplo, `CadmaState::add_molecule(...)`).
-
-
-
-Checklist corto (acción inmediata)
-
-- [ ] Actualizar `crates/flow/src/domain.rs` para añadir `domain_objects` opcional en `FlowData`.
-- [ ] Documentar comportamiento esperado en `crates/flow/src/repository.rs` (persist con domain_objects).
-- [ ] Modificar `crates/flow/src/stubs.rs` para que `InMemoryFlowRepository` guarde `domain_objects`.
-- [ ] Añadir columna `domain_objects` (JSON/TEXT) a `crates/chem-persistence/migrations/00000000000001_create_schema/up.sql` y a `schema.rs` (o crear tablas `flow_molecules` / `flow_families`).
-- [ ] Añadir opciones a `FlowEngineConfig` y usar `persist_domain_objects` en `FlowEngine::append_step` / helpers.
-- [ ] Actualizar ejemplos (`flow_simple_usage.rs`, `persistence_simple_usage.rs`) y añadir tests que demuestren los tres modos de persistencia.
-
-Notas finales: este cambio añade flexibilidad para que los pasos que generan datos del dominio los guarden junto al flujo sin forzar que todos los pasos lo hagan. Recomiendo empezar por la estrategia "inline" (columna JSON) para minimizar cambios y acelerar pruebas; luego, si aparecen problemas de tamaño o rendimiento, migrar a `artifact` o `separate_tables`.
-
-Nota nueva: el sistema debe ser genérico y no asumir un único tipo de flujo ni pasos fijos. Cada flujo puede definir su propio estado y su propia lógica de rehidratación.
-
-El documento se reescribe para introducir un trait genérico `ChemicalFlowEngine` y un contrato de recuperación explícito.
-
 ## Mapeo directo al workspace (qué ya existe)
 
 - `crates/flow/src/domain.rs` — tipos: `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult`, `WorkItem`.
@@ -369,15 +319,15 @@ flowchart TD
     B -->|no| D[Proceed to persist]
     C -->|duplicate| E[Return Duplicate]
     C -->|new| D
-    D --> F[Build FlowData (may include domain objects)]
-    F --> G{persist_domain_mode}
-    G -->|inline| H[Store domain_objects in flow_data JSON]
-    G -->|artifact| I[Put blob in ArtifactStore and store ptr]
-    G -->|separate_tables| J[Insert rows in flow_molecules / flow_families]
-    H --> K[Repo persist]
-    I --> K
-    J --> K
-    K --> L[Return PersistResult]
+  D --> F[Build FlowData may include domain objects]
+  F --> G{persist_domain_mode}
+  G -->|inline| H[Store domain_objects in flow_data JSON]
+  G -->|artifact| I[Put blob in ArtifactStore and store pointer]
+  G -->|separate_tables| J[Insert rows in flow_molecules and flow_families]
+  H --> K[Repo persist]
+  I --> K
+  J --> K
+  K --> L[Return PersistResult]
   end
 
   subgraph Rehydrate
@@ -386,16 +336,14 @@ flowchart TD
     N -->|no| P[Create empty state]
     O --> Q[Set state and cursor]
     P --> Q
-    Q --> R[Read FlowData from repo (cursor..end)]
-    R --> S[For each FlowData call apply_event]
+  Q --> R[Read FlowData from repo cursor to end]
+  R --> S[For each FlowData call apply_event]
     S --> T[State ready]
   end
 
   L --> U[Client receives result]
   T --> V[Engine continues processing]
 
-  style Persist fill:#f9f,stroke:#333,stroke-width:1px
-  style Rehydrate fill:#9ff,stroke:#333,stroke-width:1px
 ```
 
 Notas sobre el diagrama de flujo
