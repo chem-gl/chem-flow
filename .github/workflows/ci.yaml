@@ -53,20 +53,14 @@ jobs:
           docker build -t flow-chem-ci-dev --target base --build-arg FEATURES="" -f Dockerfile .
           docker build -t flow-chem-ci --build-arg FEATURES="" -f Dockerfile .
 
-      - name: Run tests inside Docker (do not generate coverage)
+      - name: Run coverage script inside Docker (generates coverage/ and enforces 90%)
         env:
           HOST_CACHE_DIR: ${{ github.workspace }}/.cache/flow
         run: |
-          # Run the test suite inside the previously built dev image.
-          # We intentionally do NOT generate coverage here; coverage artifacts
-          # will be uploaded from the repository workspace as-is.
-          docker run --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
-            -v "${{ github.workspace }}":/workspace -w /workspace \
-            -e PYO3_PYTHON=/opt/conda/bin/python \
-            -e PYTHON_SYS_EXECUTABLE=/opt/conda/bin/python \
-            -e LD_LIBRARY_PATH=/opt/conda/lib \
-            -e HOST_CACHE_DIR="${{ github.workspace }}/.cache/flow" \
-            flow-chem-ci-dev bash -lc 'set -euo pipefail; cargo test --workspace --verbose'
+          chmod +x scripts/generate_coverage.sh
+          # generate_coverage.sh runs tarpaulin with --fail-under 90; the step will
+          # fail the job if overall coverage is below 90%.
+          ./scripts/generate_coverage.sh
 
       - name: Upload coverage report (lcov only)
         uses: actions/upload-artifact@v4
