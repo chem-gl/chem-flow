@@ -69,86 +69,31 @@ información de flujos y ramas
 
 Este documento describe la arquitectura, las clases principales y el funcionamiento de todos los crates del proyecto `flow-chem`. Incluye diagramas de flujo de alto nivel para cada crate y detalla las estructuras, traits y funciones públicas implementadas.
 
----
+## Crate `chem-persistence` (persistencia del dominio)
 
-## Índice
+Este crate provee una implementación Diesel del trait de persistencia del dominio químico (tipos definidos en `crates/chem-domain`). La implementación principal es `DieselDomainRepository` y cubre:
 
-1. [Descripción general](#descripción-general)
-2. [Estructura del workspace](#estructura-del-workspace)
-3. [Crate `flow`](#crate-flow)
-   - [Diagrama de flujo](#diagrama-de-flujo-flow)
-   - [Clases y traits](#clases-y-traits-flow)
-4. [Crate `chem-domain`](#crate-chem-domain)
-   - [Diagrama de flujo](#diagrama-de-flujo-chem-domain)
-   - [Clases y estructuras](#clases-y-estructuras-chem-domain)
-5. [Crate `chem-persistence`](#crate-chem-persistence)
-   - [Diagrama de flujo](#diagrama-de-flujo-chem-persistence)
-   - [Clases y estructuras](#clases-y-estructuras-chem-persistence)
-6. [Crate `chem-providers`](#crate-chem-providers)
-   - [Diagrama de flujo](#diagrama-de-flujo-chem-providers)
-   - [Clases y estructuras](#clases-y-estructuras-chem-providers)
-7. [Ejemplos de uso](#ejemplos-de-uso)
+- Persistencia de moléculas (`molecules`), familias (`families`), mappings de miembros (`family_members`) y propiedades (tanto `family_properties` como `molecular_properties`).
+- Funciones helper para creación desde entorno y tests:
+  - `new_domain_repo_from_env()` — elige razonablemente entre Postgres y SQLite según features y variables de entorno (`CHEM_DB_URL` / `DATABASE_URL`). En tests usa un SQLite en memoria por defecto.
+  - `new_from_env()` — variante pública que valida URLs de Postgres cuando el crate se compila con la feature `pg`.
+  - `new_sqlite_for_test(database_url: &str)` — helper para crear un repo SQLite con una URL explícita (útil en tests para evitar ambigüedades de ConnectionManager).
 
----
+Detalles relevantes:
 
-## Descripción general
+- En la mayoría de lugares la implementación usa transacciones o una única conexión para evitar nested pool acquisition y mantener atomicidad en operaciones complejas (por ejemplo, crear/actualizar familias y sus miembros).
+- Para pruebas locales es común usar SQLite en memoria: por ejemplo `file:memdb1?mode=memory&cache=shared` o la URL por defecto que devuelve `new_domain_repo_from_env()` cuando no hay variables de entorno.
+- Cuando se usa Postgres (compilando con `--features pg`) el crate espera una URL de Postgres en `CHEM_DB_URL` o `DATABASE_URL` y validará que parezca una URL de Postgres.
 
-`flow-chem` es una plataforma modular para la persistencia y manipulación de flujos de datos y entidades químicas. Está compuesta por cuatro crates principales:
+Ejemplo de uso rápido (SQLite en memoria para pruebas):
 
-- `flow`: motor de persistencia basada en eventos y utilidades para flujos.
-- `chem-domain`: tipos y errores del dominio químico (moléculas, familias, propiedades).
-- `chem-persistence`: backend de persistencia usando Diesel (SQLite/Postgres).
-- `chem-providers`: integración con motores químicos externos (RDKit vía Python).
-
-## Estructura del workspace
-
-```
-flow-chem/
-├── crates/
-│   ├── flow/
-│   ├── chem-domain/
-│   ├── chem-persistence/
-│   └── chem-providers/
-├── examples/
-├── scripts/
-├── src/
-└── ...
+```rust
+let repo = chem_persistence::new_sqlite_for_test("file:memdb1?mode=memory&cache=shared");
+// o usar la función que lee el env y el feature:
+let repo = chem_persistence::new_domain_repo_from_env().unwrap();
 ```
 
----
-
-## Crate `flow`
-
-### Diagrama de flujo (alto nivel)
-
-```mermaid
-flowchart TD
-    subgraph Persistencia de Flujos
-        A[FlowEngine] --usa--> B[FlowRepository]
-        B --implementa--> C[InMemoryFlowRepository]
-        B --implementa--> D[DieselFlowRepository]
-        A --usa--> E[FlowData]
-        A --usa--> F[SnapshotMeta]
-        B --usa--> E
-        B --usa--> F
-    end
-```
-
-### Clases y traits principales
-
-- **Diagrama de clases:**
-
-```mermaid
-classDiagram
-    class FlowData {
-        +Uuid id
-        +Uuid flow_id
-        +i64 cursor
-        +String key
-        +serde_json::Value payload
-        +serde_json::Value metadata
-        +Option<Uuid> command_id
-        +DateTime<Utc> created_at
+Si necesitas migraciones la implementación ejecuta las migraciones embebidas al crear el pool y ajustar PRAGMA útiles para SQLite (WAL, busy_timeout).
     }
     class FlowMeta {
         +Uuid id
