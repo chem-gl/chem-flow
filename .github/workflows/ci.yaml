@@ -53,12 +53,20 @@ jobs:
           docker build -t flow-chem-ci-dev --target base --build-arg FEATURES="" -f Dockerfile .
           docker build -t flow-chem-ci --build-arg FEATURES="" -f Dockerfile .
 
-      - name: Run coverage script inside Docker (generates coverage/)
+      - name: Run tests inside Docker (do not generate coverage)
         env:
           HOST_CACHE_DIR: ${{ github.workspace }}/.cache/flow
         run: |
-          chmod +x scripts/generate_coverage.sh
-          ./scripts/generate_coverage.sh
+          # Run the test suite inside the previously built dev image.
+          # We intentionally do NOT generate coverage here; coverage artifacts
+          # will be uploaded from the repository workspace as-is.
+          docker run --rm --cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
+            -v "${{ github.workspace }}":/workspace -w /workspace \
+            -e PYO3_PYTHON=/opt/conda/bin/python \
+            -e PYTHON_SYS_EXECUTABLE=/opt/conda/bin/python \
+            -e LD_LIBRARY_PATH=/opt/conda/lib \
+            -e HOST_CACHE_DIR="${{ github.workspace }}/.cache/flow" \
+            flow-chem-ci-dev bash -lc 'set -euo pipefail; cargo test --workspace --verbose'
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

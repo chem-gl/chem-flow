@@ -3,5 +3,3 @@
 .test_back
 .venv
 target
-coverage
-coverage/*
