@@ -13,6 +13,65 @@ Contenido principal
   (crear flujo, añadir pasos, crear ramas, snapshots, etc.).
 - Tipos de dominio: `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult`.
 
+## Diagramas
+
+### Diagrama de clases
+
+```mermaid
+classDiagram
+  class FlowEngine {
+    +new()
+    +start_flow()
+    +append()
+    +get_items()
+    +new_branch()
+    +save_snapshot()
+    +load_latest_snapshot()
+  }
+  class FlowRepository {
+    <<trait>>
+    +create_flow()
+    +persist_data()
+    +read_data()
+    +create_branch()
+    +save_snapshot()
+    +load_snapshot()
+  }
+  class InMemoryFlowRepository
+  class DieselFlowRepository
+  class FlowData
+  class FlowMeta
+  class SnapshotMeta
+
+  FlowEngine --> FlowRepository
+  FlowRepository <|.. InMemoryFlowRepository
+  FlowRepository <|.. DieselFlowRepository
+  FlowEngine --> FlowData
+  FlowEngine --> FlowMeta
+  FlowEngine --> SnapshotMeta
+```
+
+### Diagrama de secuencia — creación de una rama (create_branch)
+
+```mermaid
+sequenceDiagram
+  participant Caller
+  participant Engine
+  participant Repo
+  participant DB
+
+  Caller->>Engine: request new branch(parent_id, parent_cursor, metadata)
+  Engine->>Repo: create_branch(parent_id, name, status, parent_cursor, metadata)
+  Repo->>DB: SELECT flow_data WHERE flow_id = parent_id AND cursor <= parent_cursor
+  Repo->>DB: SELECT snapshots WHERE flow_id = parent_id AND cursor <= parent_cursor
+  Repo->>DB: INSERT new flow (parent reference, current_cursor = parent_cursor)
+  Repo->>DB: INSERT copied flow_data rows for new flow
+  Repo->>DB: INSERT copied snapshot rows for new flow
+  DB-->>Repo: OK (ids)
+  Repo-->>Engine: new_branch_id
+  Engine-->>Caller: new_branch_id
+```
+
 
 Inicio rápido
 
@@ -29,81 +88,138 @@ cargo run --example flow_simple_usage
 Principios y comportamiento
 
 - Persistencia por registros: cada `FlowData` es autocontenido y permite
-  reconstruir el estado mediante snapshot + replay.
-- Idempotencia: se admite `command_id` en `FlowData` para prevenir duplicados.
-- Locking optimista: operaciones que modifican el flujo usan `expected_version`
-  para detectar conflictos y devolver `PersistResult::Conflict` cuando aplica.
-- Branching: `create_branch` debe ser atómico desde la perspectiva del
-  repositorio (copiar pasos y snapshots hasta el cursor indicado).
+  ## Crate `flow` — estado actual y documentación (español)
 
-Diagramas (resumen)
+  Este crate define los tipos y traits que modelan la persistencia basada en
+  registros (`FlowData`) y proporciona un motor ligero (`FlowEngine`) más
+  implementaciones en memoria para pruebas y demos. Complementariamente existe
+  una implementación SQL en `crates/chem-persistence` (`DieselFlowRepository`) que
+  provee persistencia durable usando Diesel + r2d2.
 
-Diagrama de secuencia (crear rama desde engine -> repo):
+  Contenido principal
 
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Engine
-    participant Repo
-    Caller->>Engine: request new branch (parent_id, cursor)
-    Engine->>Repo: create_branch(parent_id, name, status, cursor, metadata)
-    Repo->>Repo: copy steps and snapshots where cursor <= parent_cursor
-    Repo-->>Engine: new_branch_id
-    Engine-->>Caller: new_branch_id
-```
+  - `FlowRepository` (trait): contrato de persistencia (crear flujos, persistir
+    pasos, snapshots, crear ramas, listar, borrar, etc.).
+  - `FlowEngine`: helpers que usan el repositorio para operaciones comunes
+    (crear flujo, añadir pasos, crear ramas, snapshots, rehidratación).
+  - Implementaciones:
+    - `InMemoryFlowRepository` (stubs) — para pruebas y ejemplos.
+    - `DieselFlowRepository` — implementación SQL en `crates/chem-persistence`
+      (ver sección "Integración con chem-persistence").
+  - Tipos de dominio: `FlowData`, `FlowMeta`, `SnapshotMeta`, `PersistResult`.
 
-Estado simplificado de un flow:
+  Estado actual (qué está implementado)
 
-```mermaid
-stateDiagram-v2
-    [*] --> queued
-    queued --> running: claim_work
-    running --> waiting: blocked on gate
-    running --> queued: finish/idle
-    waiting --> running: gate_open
-    running --> completed: terminal step
-```
+  - Persistencia por registros: cada `FlowData` es autocontenido y permite
+    reconstruir el estado mediante snapshot + replay.
+  - Optimistic locking: `persist_data` en la implementación SQL usa
+    `expected_version` y devuelve `PersistResult::Conflict` si hay desajuste.
+  - `create_flow`: inserta una fila en `flows` con `current_cursor = 0` y
+    `current_version = 0` y devuelve el `Uuid` generado.
+  - `persist_data`: inserta la fila en `flow_data` y actualiza `flows.current_cursor`
+    y `flows.current_version` de forma atómica (transactional en la impl. SQL).
+  - `read_data(flow_id, from_cursor)`: devuelve `FlowData` con `cursor > from_cursor`,
+    ordenado ascendentemente.
+  - Snapshots: `save_snapshot`, `load_snapshot`, `load_latest_snapshot` están
+    implementados en la capa SQL; actualmente el contenido del snapshot se
+    guarda en la columna `state_ptr` como texto (no hay object-store aún).
+  - Branching: `create_branch(parent_id, parent_cursor, ...)` crea una nueva
+    fila en `flows` y copia (en la base de datos) todas las filas de `flow_data`
+    y `snapshots` del padre cuyo `cursor <= parent_cursor`. La operación es
+    transaccional en la implementación SQL.
+  - `delete_branch`: elimina `flow_data` y `snapshots` del branch y orfana a los
+    hijos (pone `parent_flow_id` y `parent_cursor` a NULL); no borra recursivamente
+    ramas hijas.
+  - Operaciones no implementadas / esqueleto: `delete_from_step` devuelve
+    `not implemented`; `claim_work`, `SnapshotStore` (persistencia externa de
+    blobs) y `ArtifactStore` están esbozados y devuelven errores por ahora.
 
-Notas prácticas y comportamiento importante
+  Integración con `crates/chem-persistence`
 
-- `InMemoryFlowRepository` es una implementación apta para pruebas y ejemplos.
-  No es transaccional ni durable; para producción se recomienda una
-  implementación sobre Postgres + object store para snapshots y artifacts.
-- `delete_branch` en las implementaciones actuales NO borra recursivamente
-  ramas hijas; en su lugar las orfana (actualiza `parent_flow_id`/`parent_cursor`
-  a NULL). Ajusta la implementación si necesitas borrado recursivo.
+  - `DieselFlowRepository` vive en `crates/chem-persistence` y expone una
+    implementación SQL del trait `FlowRepository`:
+    - Usa Diesel + r2d2.
+    - Por defecto los tests usan SQLite en memoria; la feature `pg` permite
+      compilar y usar Postgres en producción.
+    - Aplica migraciones embebidas al arrancar (migrations en
+      `crates/chem-persistence/migrations`).
+    - Tablas principales (ver `schema.rs`): `flows`, `flow_data`, `snapshots`.
+    - Además existen tablas relacionadas con el dominio químico: `molecules`,
+      `families`, `family_properties`, `molecular_properties`, `family_members`.
 
-Tests y validación
+  Esquema (resumen)
 
-- Tests unitarios y de integración para `InMemoryFlowRepository` se encuentran
-  en `crates/flow/tests/`.
-- Para ejecutar los tests del crate `flow`:
+  - Tabla `flows` (id TEXT PK): metadata del flujo, `current_cursor`,
+    `current_version`, `parent_flow_id`, `parent_cursor`, `metadata` (JSON).
+  - Tabla `flow_data` (id TEXT PK): `flow_id`, `cursor`, `key`, `payload` (JSON),
+    `metadata` (JSON), `command_id`, `created_at_ts`.
+  - Tabla `snapshots` (id TEXT PK): `flow_id`, `cursor`, `state_ptr` (texto/URI),
+    `metadata` (JSON), `created_at_ts`.
 
-```bash
-cargo test -p flow
-```
+  Migraciones
 
-Cómo ejecutar ejemplos y uso local
+  - Las migraciones SQL están en `crates/chem-persistence/migrations/`. Hay al
+    menos dos migraciones: la creación del esquema básico (`flows`,
+    `flow_data`, `snapshots`) y las tablas químicas (`molecules`, `families`,
+    `family_properties`, `molecular_properties`, `family_members`).
 
-- Ejecutar el ejemplo de uso en memoria (desde el crate):
+  Cómo ejecutar (rápido)
 
-```bash
-cd crates/flow
-cargo run --example flow_simple_usage
-```
+  - Ejecutar tests del crate `flow`:
 
-- Ejecutar el ejemplo `flow_simple_usage` desde la raíz del workspace:
+  ```bash
+  cargo test -p flow
+  ```
 
-```bash
-cargo run -p flow --example flow_simple_usage
-```
+  - Ejecutar el ejemplo local de `flow` (InMemory):
 
-- Notas de entorno: si algún ejemplo o test depende de `DATABASE_URL` u otras
-  variables, define esas variables en el entorno o usa un `.env` en la raíz.
+  ```bash
+  cd crates/flow
+  cargo run --example flow_simple_usage
+  ```
 
-Contribuciones y siguientes pasos
+  - Para la implementación SQL (chem-persistence):
 
-- Implementar `PostgresFlowRepository` (transaccional) y un `SnapshotStore`
-  que guarde estados en un object store.
-- Añadir pruebas de concurrencia y validación de copia de snapshots al crear
-  ramas.
+  ```bash
+  # Tests (usa sqlite in-memory por defecto)
+  cargo test -p chem-persistence
+
+  # Ejemplo de persistencia:
+  cargo run -p chem-persistence --example persistence_simple_usage
+  ```
+
+  - Para usar Postgres (producción/demo con DB real), exporta `DATABASE_URL`
+    y compila con la feature `pg` cuando proceda. Por ejemplo:
+
+  ```bash
+  export DATABASE_URL=postgres://user:pass@localhost:5432/dbname
+  cargo run -p chem-persistence --features pg --example persistence_simple_usage
+  ```
+
+  Limitaciones conocidas y siguientes pasos
+
+  - Snapshot storage: actualmente los snapshots se guardan como texto en
+    `state_ptr`. Se recomienda implementar un `SnapshotStore` que guarde blobs
+    en un object store (S3/MinIO) y deje `state_ptr` como key/URI.
+  - `ArtifactStore` y métodos relacionados aún no están implementados en la
+    versión SQL (devuelven errores `not implemented`).
+  - `delete_branch` orfana hijos en lugar de borrado recursivo. Si necesitas
+    borrado en cascada implementa lógica adicional y tests.
+  - Se recomienda añadir pruebas de integración que validen explícitamente la
+    copia de `snapshots` al crear ramas y pruebas de concurrencia para
+    `persist_data`.
+
+  Contribuciones
+
+  Si deseas ayudar a mejorar el crate `flow` o la implementación SQL:
+
+  - Implementa `SnapshotStore` con object store.
+  - Completa `ArtifactStore` con una implementación estable.
+  - Añade pruebas de integración para Postgres (activar `pg` feature en CI)
+    y escenarios de concurrencia.
+
+  Contacto
+
+  Revisar el código fuente en `crates/flow/src/` y la implementación SQL en
+  `crates/chem-persistence/` para detalles de las funciones. Para cambios más
+  grandes abre un issue o PR en el repositorio.

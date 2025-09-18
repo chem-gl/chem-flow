@@ -1,167 +1,176 @@
+# Crate `chem-persistence` — implementación Diesel de persistencia
 
-# Crate `chem-persistence` (documentación en español)
-
-`chem-persistence` implementa una persistencia mínima para el trait
-`FlowRepository` definido en el crate `flow`. Usa Diesel como capa de acceso
-a base de datos y ofrece migraciones embebidas para inicializar el esquema.
-Está pensado como referencia y como backend ligero para pruebas y demos.
+Este crate provee una implementación basada en Diesel (SQLite para tests
+y opcionalmente Postgres con la feature `pg`) de los contracts de persistencia
+usados en el workspace: las abstracciones de `flow` (FlowRepository /
+SnapshotStore / ArtifactStore) y el trait de dominio `DomainRepository`
+definido en `crates/chem-domain`.
 
 Resumen rápido
-- Soporta SQLite (por defecto para tests) y Postgres (activando la feature
-  `pg`).
-- Mantiene tres tablas principales: `flows`, `flow_data` y `snapshots`.
-- Provee operaciones atómicas para persistir pasos (`FlowData`), crear ramas
-  (branching) copiando pasos y snapshots hasta un cursor, y eliminar ramas.
 
-## Objetivos y responsabilidades
+- Implementaciones Diesel para persistir flujos (`flows`, `flow_data`,
+  `snapshots`) y objetos químicos (`molecules`, `families`, `family_properties`,
+  `molecular_properties`, `family_members`).
+- Soporte para SQLite (tests / uso local) y Postgres (feature `pg`).
+- Helpers de inicialización desde variables de entorno: `new_from_env`,
+  `new_domain_repo_from_env` y `new_sqlite_for_test` (tests).
+- Ejemplos y tests que muestran el ciclo de vida: creación de flows,
+  branching, persistencia de datos y gestión de familias y propiedades.
 
-- Persistir metadatos de flujos (`flows`) y registros autocontenidos
-  (`flow_data`) que permiten reconstruir el estado mediante replay.
-- Guardar metadata de snapshots en la tabla `snapshots` (el contenido del
-  estado puede almacenarse en `state_ptr` como texto o como referencia a un
-  object store, dependiendo de la implementación futura del `SnapshotStore`).
-- Ofrecer helpers para inicializar la base de datos (migraciones embebidas)
-  y funciones utilitarias para debugging y ejemplos.
+Archivos principales
 
-## Estructuras y API pública (resumen)
+- `src/lib.rs` — reexporta los repositorios y expone el módulo `schema`.
+- `src/schema.rs` — definición Diesel de las tablas usadas por la
+  persistencia de flows y entidades químicas.
+- `src/flow_persistence.rs` — implementación de `DieselFlowRepository`
+  (implementa `FlowRepository`, `SnapshotStore`, `ArtifactStore`).
+- `src/domain_persistence.rs` — implementación de `DieselDomainRepository`
+  que implementa `DomainRepository` del crate `chem-domain`.
+- `migrations/` — migraciones Diesel utilizadas para crear las tablas
+  necesarias (`00000000000001_create_schema`, `00000000000002_create_chem_tables`).
+- `examples/persistence_simple_usage.rs` — ejemplo que muestra uso básico
+  de la persistencia (crear flows, ramas, persistir pasos, dump tables).
+- `tests/` — pruebas de integración y unitarias que ejercitan la lógica
+  de persistencia para flows y dominio químico (`domain_persistence.rs`,
+  `integration_tests.rs`).
 
-Nota: aquí se documenta el comportamiento observable de los métodos públicos.
-Para la definición del trait y las firmas exactas consulta `crates/flow/src/repository.rs`.
+Contratos y puntos de extensión
 
-- `DieselFlowRepository`
-  - Implementación de `FlowRepository` usando Diesel + r2d2.
-  - Métodos de interés:
-    - `new(database_url: &str) -> Result<DieselFlowRepository, FlowError>`: crea un repo
-      con la URL indicada (SQLite o Postgres según la URL y features).
-    - `new_from_env() -> Result<DieselFlowRepository, FlowError>`: lee `DATABASE_URL`
-      (usa `dotenvy` si existe `.env`), crea el pool y aplica migraciones
-      embebidas antes de devolver el repo.
-    - `dump_tables_for_debug() -> Result<(Vec<FlowRow>, Vec<FlowDataRow>), FlowError>`:
-      helper para tests y depuración que devuelve las filas actuales de
-      `flows` y `flow_data`.
+- El crate implementa los traits definidos en `flow` y `chem-domain`, por lo
+  que puede usarse como backend de persistencia para las capas superiores
+  del sistema. Cambiar entre SQLite y Postgres se controla por la feature
+  `pg` y la variable de entorno `DATABASE_URL` / `CHEM_DB_URL`.
 
-- Comportamiento clave del `FlowRepository` implementado:
-  - `create_flow(name, status, metadata)`: inserta una fila en `flows` con
-    `current_cursor=0` y `current_version=0` y devuelve el `Uuid` generado.
-  - `persist_data(fd, expected_version)`: inserta un registro en `flow_data`
-    y actualiza `flows.current_cursor`/`current_version` de forma atómica.
-    Usa locking optimista: si `expected_version` no coincide devuelve
-    `PersistResult::Conflict`.
-  - `read_data(flow_id, from_cursor)`: devuelve los `FlowData` con `cursor > from_cursor`.
-  - `create_branch(parent_flow_id, name, status, parent_cursor, metadata)`: crea
-    una nueva fila en `flows` con referencia al padre y copia (en la BD) todos
-    los `flow_data` y snapshots del padre con `cursor <= parent_cursor`.
-    La operación es transaccional.
-  - `branch_exists(flow_id)`, `count_steps(flow_id)` y `delete_branch(flow_id)`:
-    utilidades habituales; `delete_branch` elimina datos y snapshots del
-    branch y, en la implementación actual, "orfana" a los hijos (los hijos
-    mantienen `parent_flow_id = NULL` en lugar de borrarse recursivamente).
-  - `save_snapshot`, `load_snapshot`, `load_latest_snapshot`: gestión básica
-    de snapshots; actualmente `state_ptr` se guarda como texto y se devuelve
-    como bytes por `load_snapshot`.
+Cómo usar (rápido)
 
-## Limitaciones y decisiones de diseño
-
-- Este crate es una implementación de referencia: orientado a pruebas y demos.
-- Por defecto `diesel` está configurado para SQLite en los tests. Para usar
-  Postgres activa la feature `pg` en `crates/chem-persistence/Cargo.toml`.
-- `delete_branch` orfana hijos en vez de eliminarlos recursivamente. Esto
-  evita borrados accidentales de subárboles; adapta la lógica si necesitas
-  otra semántica (por ejemplo, borrado recursivo).
-- Los stores de artifacts/snapshots están esbozados aquí; para producción se
-  recomienda un `SnapshotStore` que guarde estados en un object store (S3,
-  MinIO) y deje `state_ptr` como key/URI.
-
-## Migraciones
-
-Las migraciones SQL están en `migrations/00000000000001_create_schema/`.
-`new_from_env()` aplica las migraciones embebidas automáticamente al crear
-el repositorio (cuando procede), por lo que normalmente no necesitas ejecutar
-comandos manuales de migración en entornos de prueba o desarrollo.
-
-## Cómo ejecutar y probar
-
-Desde la raíz del workspace puedes ejecutar los tests y ejemplos locales:
-
-```bash
-# ejecutar tests (usa sqlite en memoria por defecto)
-cargo test -p chem-persistence
-
-# ejecutar el ejemplo de persistencia (usa DATABASE_URL si está definido)
-cargo run -p chem-persistence --example persistence_simple_usage
-```
-
-Notas rápidas:
-
-- Para pruebas locales se usa SQLite en memoria salvo que se compile con la
-  feature `pg`.
-- Para producción activa la feature `pg` y proporciona una `DATABASE_URL`
-  apuntando a Postgres.
-
-## Contribuciones y mantenimiento
-
-Si vas a extender este crate para producción, considera implementar un
-`SnapshotStore` que guarde blobs en un object store (S3/MinIO) y un
-`ArtifactStore` estable para los artefactos pesados. Añade también pruebas
-de integración apuntando a una BD Postgres dedicada cuando actives `pg`.
-el repositorio, por lo que normalmente no necesitas ejecutar `diesel migration`.
-
-## Cómo probar y ejecutar (comandos)
-
-Desde la raíz del workspace:
-
-- Ejecutar tests del crate `chem-persistence` (SQLite in-memory):
-
-```bash
-cargo test -p chem-persistence
-```
-
-- Ejecutar el ejemplo que usa DB en memoria (demo):
+1. Para ejecutar el ejemplo localmente usando SQLite en memoria:
 
 ```bash
 cd crates/chem-persistence
-cargo run --example simple_usage
+export DATABASE_URL="file:memdb1?mode=memory&cache=shared"
+cargo run --example persistence_simple_usage
 ```
 
-- Ejecutar la aplicación principal `main-core` usando Postgres (asegúrate
-  de exportar `DATABASE_URL` o crear `.env`):
+1. Para tests del dominio que usan SQLite (ya incluidos en `tests/`):
 
 ```bash
-export DATABASE_URL=postgres://admin:admin123@localhost:5432/mydatabase
-cargo run -p main-core --features pg_demo
+cd crates/chem-persistence
+cargo test
 ```
 
-- Si usas Docker Compose (archivo `docker-compose.yml` incluido), el
-  servicio de BD se llama `db` y puedes usar:
+1. Para usar Postgres (feature `pg`): establece `DATABASE_URL` con la URL
+  de tu base de datos y compila con la feature `pg`.
 
-```bash
-# from repo root
-docker compose up -d db
-# luego dentro del contenedor o desde el host (host=localhost vs db según contexto):
-export DATABASE_URL=postgres://admin:admin123@db:5432/mydatabase
-cargo run -p main-core --features pg_demo
+Diagrama de clases
+
+Representación de alto nivel de los tipos clave y su relación con Diesel
+rows/repositories.
+
+```mermaid
+classDiagram
+    class DieselDomainRepository {
+        - pool: DbPool
+        + new(database_url: &str)
+        + save_molecule(m: Molecule)
+        + save_family(f: MoleculeFamily)
+        + add_molecule_to_family(family_id, m)
+        + remove_molecule_from_family(family_version_id, inchikey)
+    }
+
+    class MoleculeRow {
+        + inchikey: String
+        + smiles: String
+        + inchi: String
+        + metadata: String
+    }
+
+    class FamilyRow {
+        + id: String
+        + name: Option<String>
+        + description: Option<String>
+        + family_hash: String
+        + provenance: String
+        + frozen: bool
+    }
+
+    class FamilyPropertyRow
+    class MolecularPropertyRow
+    class FamilyMemberRow
+
+    DieselDomainRepository --> MoleculeRow
+    DieselDomainRepository --> FamilyRow
+    DieselDomainRepository --> FamilyPropertyRow
+    DieselDomainRepository --> MolecularPropertyRow
+    DieselDomainRepository --> FamilyMemberRow
+
+    class DieselFlowRepository {
+        - pool: DbPool
+        + create_flow(...)
+        + persist_data(fd: FlowData, expected_version: i64)
+        + create_branch(...)
+        + read_data(flow_id, cursor)
+    }
+
+    class FlowRow
+    class FlowDataRow
+    class SnapshotRow
+
+    DieselFlowRepository --> FlowRow
+    DieselFlowRepository --> FlowDataRow
+    DieselFlowRepository --> SnapshotRow
+
+    FlowRow <-- FlowDataRow : flow_id
+    FlowRow <-- SnapshotRow : flow_id
 ```
 
-## Buenas prácticas para QA
+Diagrama de flujo — persistencia de un nuevo paso (alta nivel)
 
-- Para pruebas rápidas usa la URL SQLite en memoria:
-  `file:memdb_<uuid>?mode=memory&cache=shared`.
-- Verifica branching creando un flujo, añadiendo pasos, creando una rama
-  con `parent_cursor` y comprobando que los pasos hasta ese cursor se copiaron
-  en la nueva rama.
+Este diagrama muestra el flujo cuando el motor de aplicación persiste un
+nuevo `FlowData` usando `DieselFlowRepository::persist_data`.
 
-## Desarrollo y puntos futuros
+```mermaid
+flowchart TD
+    App[Aplicacion - FlowEngine]
+    Repo[DieselFlowRepository]
+    DB_box[Base de datos]
 
-- Implementar `SnapshotStore` sobre un object store (S3/MinIO) y usar claves
-  en `state_ptr` en lugar de texto serializado.
-- Optimizar la copia de artifacts al crear ramas (copy-on-write o referencias).
-- Añadir tests que validen explícitamente la copia de snapshots durante
-  `create_branch`.
+    App -->|persist_data fd expected_ver| Repo
+    Repo -->|SELECT flows WHERE id = flow_id| DB_box
+    DB_box -->|flow row| Repo
+    Repo -->|verify version match| Repo
+    Repo -->|INSERT INTO flow_data| DB_box
+    DB_box -->|ok| Repo
+    Repo -->|UPDATE flows set cursor and version| DB_box
+    DB_box -->|ok| Repo
+    Repo -->|return OK| App
 
-Si quieres, puedo además:
-
-- Añadir tests automáticos que verifiquen la copia de snapshots al crear ramas.
-- Actualizar `README.md` del crate `flow` para unificar ejemplos y firmas.
-
-Fin del README.
+    subgraph error_path
+      Repo -->|version mismatch| App
+    end
 ```
+
+Notas y buenas prácticas
+
+- Para tests aislados se recomienda usar `DATABASE_URL` apuntando a
+  `file:memdb_...` con `cache=shared` para evitar bloqueos entre hilos.
+- Las migraciones incluidas deben ejecutarse antes de usar la base de datos
+  real en Postgres; en el modo embebido (`embed_migrations!`) las migraciones
+  se aplican automáticamente en `new_from_env`/`new`.
+- El crate expone funciones helper `new_from_env` y `new_domain_repo_from_env`
+  para facilitar la inicialización desde entornos distintos (CI, local,
+  containers).
+
+Contribuir
+
+- Abrir issues para inconsistencias entre la schema Diesel y las migraciones.
+- Añadir tests que reproduzcan fallos de concurrencia (persist_data) o
+  casos límite en versionado/branching.
+
+Licencia
+
+Este repositorio hereda la licencia del workspace principal. Consulta el
+`LICENSE` en la raíz del proyecto.
+
+---
+Generado a partir de los READMEs de los crates `chem-domain` y `flow` y
+los archivos fuente en `src/` del presente crate.

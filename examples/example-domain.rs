@@ -37,6 +37,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "9" => remove_molecule_from_family(repo.as_ref())?,
             "10" => delete_molecule(repo.as_ref())?,
             "11" => delete_family(repo.as_ref())?,
+            "12" => list_all_molecules(repo.as_ref())?,
             "q" | "Q" => {
                 println!("Saliendo...");
                 break;
@@ -61,6 +62,7 @@ fn print_menu() {
     println!("9) Quitar molécula de una familia (crea nueva versión)");
     println!("10) Eliminar molécula (fallará si pertenece a alguna familia)");
     println!("11) Eliminar familia (borra propiedades y mappings)");
+    println!("12) Listar todas las moléculas (para selección en otras opciones)");
     println!("q) Salir");
 }
 
@@ -70,6 +72,23 @@ fn prompt(msg: &str) -> io::Result<String> {
     let mut s = String::new();
     io::stdin().read_line(&mut s)?;
     Ok(s.trim_end().to_string())
+}
+
+fn list_all_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+    match repo.list_molecules() {
+        Ok(mols) => {
+            println!("Moléculas encontradas: {}", mols.len());
+            for (i, m) in mols.iter().enumerate() {
+                println!("{}: InChIKey={} SMILES={} metadata={}",
+                         i + 1,
+                         m.inchikey(),
+                         m.smiles(),
+                         m.metadata());
+            }
+        }
+        Err(e) => println!("Error listando moléculas: {:?}", e),
+    }
+    Ok(())
 }
 
 fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
