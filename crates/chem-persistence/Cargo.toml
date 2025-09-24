@@ -7,7 +7,9 @@ edition = "2021"
 # the lightweight SQLite backend. Production builds should enable the
 # `pg` feature (for example via `--features pg`).
 [features]
-default = []
+# Prefer Postgres by default for examples/production. Tests can still run
+# with sqlite by specifying dev-dependencies or overriding features.
+default = ["pg"]
 # Desactiva la inserción de artifacts (para aislar posibles segfaults en tests)
 no-artifact-insert = []
 # Feature alias to enable the Postgres backend in Diesel

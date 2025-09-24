@@ -13,113 +13,126 @@ use uuid::Uuid;
 /// real: cada registro contiene la información necesaria para reconstruir el
 /// estado en un cursor dado y se guarda inmediatamente.
 pub trait FlowRepository: Send + Sync {
-    /// Obtiene metadatos ligeros del `flow`.
-    ///
-    /// Retorna `FlowMeta` con campos como `current_cursor` y `current_version`.
-    /// Debe devolver `Err(FlowError::NotFound)` si el flow no existe.
-    fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta>;
+  /// Obtiene metadatos ligeros del `flow`.
+  ///
+  /// Retorna `FlowMeta` con campos como `current_cursor` y `current_version`.
+  /// Debe devolver `Err(FlowError::NotFound)` si el flow no existe.
+  fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta>;
 
-    /// Crea un nuevo flow (insert en tabla `flows`). El repositorio genera
-    /// el `flow_id` y completa los campos derivados (created_at, version,
-    /// cursor). Se pasa sólo la información ergonomica: `name`, `status`
-    /// y `metadata`.
-    fn create_flow(&self, name: Option<String>, status: Option<String>, metadata: JsonValue) -> Result<Uuid>;
+  /// Crea un nuevo flow (insert en tabla `flows`). El repositorio genera
+  /// el `flow_id` y completa los campos derivados (created_at, version,
+  /// cursor). Se pasa sólo la información ergonomica: `name`, `status`
+  /// y `metadata`.
+  fn create_flow(&self, name: Option<String>, status: Option<String>, metadata: JsonValue) -> Result<Uuid>;
 
-    /// Persiste un registro de datos para el flujo. `expected_version` permite
-    /// controlar concurrencia (optimistic). Devuelve `PersistResult`.
-    ///
-    /// Comportamiento esperado:
-    /// - Si `expected_version` no coincide con la versión actual ->
-    ///   `PersistResult::Conflict`.
-    /// - Si `command_id` está presente y ya existe un registro con ese
-    ///   `command_id` -> comportamiento idempotente (no duplicar).
-    fn persist_data(&self, data: &FlowData, expected_version: i64) -> Result<PersistResult>;
+  /// Persiste un registro de datos para el flujo. `expected_version` permite
+  /// controlar concurrencia (optimistic). Devuelve `PersistResult`.
+  ///
+  /// Comportamiento esperado:
+  /// - Si `expected_version` no coincide con la versión actual ->
+  ///   `PersistResult::Conflict`.
+  /// - Si `command_id` está presente y ya existe un registro con ese
+  ///   `command_id` -> comportamiento idempotente (no duplicar).
+  fn persist_data(&self, data: &FlowData, expected_version: i64) -> Result<PersistResult>;
 
-    /// Lee registros de datos a partir de un cursor (exclusive), ordenados.
-    fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>>;
+  /// Lee registros de datos a partir de un cursor (exclusive), ordenados.
+  fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>>;
 
-    /// Devuelve metadata del último snapshot para este flow, si existe.
-    fn load_latest_snapshot(&self, flow_id: &Uuid) -> Result<Option<SnapshotMeta>>;
+  /// Devuelve metadata del último snapshot para este flow, si existe.
+  fn load_latest_snapshot(&self, flow_id: &Uuid) -> Result<Option<SnapshotMeta>>;
 
-    /// Carga snapshot por id: devuelve bytes serializados + metadata.
-    fn load_snapshot(&self, snapshot_id: &Uuid) -> Result<(Vec<u8>, SnapshotMeta)>; // bytes, meta
+  /// Carga snapshot por id: devuelve bytes serializados + metadata.
+  fn load_snapshot(&self, snapshot_id: &Uuid) -> Result<(Vec<u8>, SnapshotMeta)>; // bytes, meta
 
-    /// Guarda snapshot: escribe blob en object store y metadata en Postgres.
-    fn save_snapshot(&self, flow_id: &Uuid, cursor: i64, state_ptr: &str, metadata: serde_json::Value) -> Result<Uuid>;
+  /// Guarda snapshot: escribe blob en object store y metadata en Postgres.
+  fn save_snapshot(&self, flow_id: &Uuid, cursor: i64, state_ptr: &str, metadata: serde_json::Value) -> Result<Uuid>;
 
-    /// Crea una rama (branch) a partir de `parent_flow_id` y `parent_cursor`.
-    /// Firma ergonomica: el caller pasa `name`, `status`, `parent_cursor`
-    /// y `metadata`. El repositorio genera el nuevo `flow_id`, copia los
-    /// `FlowData` del padre hasta `parent_cursor` y persiste la nueva fila
-    /// en `flows`. Devuelve el `Uuid` de la nueva rama.
-    ///
-    /// Debe hacerse de forma atómica por el repositorio concreto.
-    fn create_branch(&self,
-                     parent_flow_id: &Uuid,
-                     name: Option<String>,
-                     status: Option<String>,
-                     parent_cursor: i64,
-                     metadata: JsonValue)
-                     -> Result<Uuid>;
+  /// Crea una rama (branch) a partir de `parent_flow_id` y `parent_cursor`.
+  /// Firma ergonomica: el caller pasa `name`, `status`, `parent_cursor`
+  /// y `metadata`. El repositorio genera el nuevo `flow_id`, copia los
+  /// `FlowData` del padre hasta `parent_cursor` y persiste la nueva fila
+  /// en `flows`. Devuelve el `Uuid` de la nueva rama.
+  ///
+  /// Debe hacerse de forma atómica por el repositorio concreto.
+  fn create_branch(&self,
+                   parent_flow_id: &Uuid,
+                   name: Option<String>,
+                   status: Option<String>,
+                   parent_cursor: i64,
+                   metadata: JsonValue)
+                   -> Result<Uuid>;
 
-    /// Verifica si existe una rama/flow con el id dado.
-    fn branch_exists(&self, flow_id: &Uuid) -> Result<bool>;
+  /// Verifica si existe una rama/flow con el id dado.
+  fn branch_exists(&self, flow_id: &Uuid) -> Result<bool>;
 
-    /// Cuenta cuántos pasos (`FlowData`) tiene un flow. Debe devolver
-    /// -1 si el flow no existe, 0 si existe pero no tiene pasos.
-    fn count_steps(&self, flow_id: &Uuid) -> Result<i64>;
+  /// Cuenta cuántos pasos (`FlowData`) tiene un flow. Debe devolver
+  /// -1 si el flow no existe, 0 si existe pero no tiene pasos.
+  fn count_steps(&self, flow_id: &Uuid) -> Result<i64>;
 
-    /// Elimina una rama y todas sus subramas (recursivo). Borra metadata,
-    /// steps y snapshots asociados.
-    fn delete_branch(&self, flow_id: &Uuid) -> Result<()>;
+  /// Elimina una rama y todas sus subramas (recursivo). Borra metadata,
+  /// steps y snapshots asociados.
+  fn delete_branch(&self, flow_id: &Uuid) -> Result<()>;
 
-    /// Elimina todos los pasos y subramas a partir de un cursor dado
-    /// (inclusive) en el flow `flow_id`.
-    fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()>;
+  /// Elimina todos los pasos y subramas a partir de un cursor dado
+  /// (inclusive) en el flow `flow_id`.
+  fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()>;
 
-    /// Lock ligero para actualizaciones (puede mapear a check de versión).
-    fn lock_for_update(&self, flow_id: &Uuid, expected_version: i64) -> Result<bool>;
+  /// Lock ligero para actualizaciones (puede mapear a check de versión).
+  fn lock_for_update(&self, flow_id: &Uuid, expected_version: i64) -> Result<bool>;
 
-    /// Claim de trabajo para workers. Marca job como in-flight o devuelve
-    /// `None`.
-    fn claim_work(&self, worker_id: &str) -> Result<Option<WorkItem>>;
+  /// Claim de trabajo para workers. Marca job como in-flight o devuelve
+  /// `None`.
+  fn claim_work(&self, worker_id: &str) -> Result<Option<WorkItem>>;
 
-    /// Obtiene el estado (status) actual del flow.
-    fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>>;
+  /// Obtiene el estado (status) actual del flow.
+  fn get_flow_status(&self, flow_id: &Uuid) -> Result<Option<String>>;
 
-    /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se
-    /// actualizó correctamente.
-    fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta>;
+  /// Actualiza el estado (status) del flow. Devuelve el nuevo FlowMeta si se
+  /// actualizó correctamente.
+  fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> Result<FlowMeta>;
 
-    /// Devuelve los ids (UUID) de todos los flujos persistidos.
-    ///
-    /// Útil para inspección y para desacoplar lógica que quiera enumerar
-    /// flujos sin conocer la implementación interna del repositorio.
-    fn list_flow_ids(&self) -> Result<Vec<Uuid>>;
+  /// Read a single metadata value by key from the `metadata` JSON object
+  /// stored on the Flow. If the key is not present, returns
+  /// `serde_json::Value::Null`.
+  fn get_meta(&self, flow_id: &Uuid, key: &str) -> Result<serde_json::Value>;
 
-    /// Helper de depuración: devuelve una copia de las tablas `flows` y
-    /// `flow_data` en tipos de dominio. Pensado sólo para uso CLI/tests.
-    ///
-    /// No es obligatorio para implementaciones productivas, pero es
-    /// conveniente para ejemplos y debugging local. Implementaciones
-    /// deben devolver pares (Vec<FlowMeta>, Vec<FlowData>).
-    fn dump_tables_for_debug(&self) -> Result<(Vec<FlowMeta>, Vec<FlowData>)>;
+  /// Set a metadata key to the provided JSON value. Creates the metadata
+  /// object if it did not exist.
+  fn set_meta(&self, flow_id: &Uuid, key: &str, value: serde_json::Value) -> Result<()>;
+
+  /// Delete a metadata key from the flow's metadata object. No-op if key
+  /// not present.
+  fn del_meta(&self, flow_id: &Uuid, key: &str) -> Result<()>;
+
+  /// Devuelve los ids (UUID) de todos los flujos persistidos.
+  ///
+  /// Útil para inspección y para desacoplar lógica que quiera enumerar
+  /// flujos sin conocer la implementación interna del repositorio.
+  fn list_flow_ids(&self) -> Result<Vec<Uuid>>;
+
+  /// Helper de depuración: devuelve una copia de las tablas `flows` y
+  /// `flow_data` en tipos de dominio. Pensado sólo para uso CLI/tests.
+  ///
+  /// No es obligatorio para implementaciones productivas, pero es
+  /// conveniente para ejemplos y debugging local. Implementaciones
+  /// deben devolver pares (Vec<FlowMeta>, Vec<FlowData>).
+  fn dump_tables_for_debug(&self) -> Result<(Vec<FlowMeta>, Vec<FlowData>)>;
 }
 
 // Store traits para separar implementaciones de bajo nivel.
 pub trait SnapshotStore: Send + Sync {
-    /// Guarda bytes serializados y devuelve una key (p.ej. s3 key).
-    fn save(&self, state: &[u8]) -> Result<String>;
-    /// Carga bytes desde la key.
-    fn load(&self, key: &str) -> Result<Vec<u8>>;
+  /// Guarda bytes serializados y devuelve una key (p.ej. s3 key).
+  fn save(&self, state: &[u8]) -> Result<String>;
+  /// Carga bytes desde la key.
+  fn load(&self, key: &str) -> Result<Vec<u8>>;
 }
 
 pub trait ArtifactStore: Send + Sync {
-    /// Almacena blob y devuelve key.
-    fn put(&self, blob: &[u8]) -> Result<String>;
-    /// Recupera blob por key.
-    fn get(&self, key: &str) -> Result<Vec<u8>>;
-    /// Copia el blob si se necesita aislamiento (copy-on-write), devuelve nueva
-    /// key.
-    fn copy_if_needed(&self, src_key: &str) -> Result<String>;
+  /// Almacena blob y devuelve key.
+  fn put(&self, blob: &[u8]) -> Result<String>;
+  /// Recupera blob por key.
+  fn get(&self, key: &str) -> Result<Vec<u8>>;
+  /// Copia el blob si se necesita aislamiento (copy-on-write), devuelve nueva
+  /// key.
+  fn copy_if_needed(&self, src_key: &str) -> Result<String>;
 }

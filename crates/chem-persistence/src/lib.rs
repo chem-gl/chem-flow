@@ -10,4 +10,4 @@ pub mod schema;
 #[cfg(not(feature = "pg"))]
 pub use domain_persistence::new_sqlite_for_test;
 pub use domain_persistence::{new_domain_repo_from_env, new_from_env as new_domain_from_env, DieselDomainRepository};
-pub use flow_persistence::{new_from_env, DieselFlowRepository};
+pub use flow_persistence::{new_from_env as new_flow_from_env, DieselFlowRepository};

@@ -11,21 +11,21 @@ use thiserror::Error;
 /// - `Other`: cualquier otro error.
 #[derive(Error, Debug)]
 pub enum FlowError {
-    /// Entidad no encontrada (por ejemplo, flow o snapshot).
-    #[error("No encontrado: {0}")]
-    NotFound(String),
+  /// Entidad no encontrada (por ejemplo, flow o snapshot).
+  #[error("No encontrado: {0}")]
+  NotFound(String),
 
-    /// Conflicto optimista (version/expected mismatch).
-    #[error("Conflicto: {0}")]
-    Conflict(String),
+  /// Conflicto optimista (version/expected mismatch).
+  #[error("Conflicto: {0}")]
+  Conflict(String),
 
-    /// Error genérico de almacenamiento (BD, S3, etc.).
-    #[error("Error de almacenamiento: {0}")]
-    Storage(String),
+  /// Error genérico de almacenamiento (BD, S3, etc.).
+  #[error("Error de almacenamiento: {0}")]
+  Storage(String),
 
-    /// Otro tipo de error.
-    #[error("Otro: {0}")]
-    Other(String),
+  /// Otro tipo de error.
+  #[error("Otro: {0}")]
+  Other(String),
 }
 
 /// Alias de resultado usado por las APIs del crate.

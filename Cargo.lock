@@ -413,6 +413,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "chem-workflow"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "chem-domain",
+ "chem-persistence",
+ "chrono",
+ "flow",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "uuid",
+]
+
+[[package]]
 name = "chemflow-rust"
 version = "0.1.0"
 dependencies = [

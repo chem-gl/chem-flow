@@ -10,11 +10,12 @@ uuid = { version = "1.4", features = ["serde", "v4"] }
 anyhow = "1.0"
 thiserror = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
-base64 = "0.21"
+base64 = "0.22"
 
 # workspace crates as path deps
 flow = { path = "../flow" }
 chem-domain = { path = "../chem-domain" }
+chem-persistence = { path = "../chem-persistence" }
 
 [lib]
 name = "chem_workflow"

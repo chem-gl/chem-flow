@@ -39,10 +39,11 @@ path = "src/main.rs"
 
 [workspace]
 members = [
-    "crates/chem-domain",
-    "crates/flow",
-    "crates/chem-persistence",
-    "crates/chem-providers"
+  "crates/chem-domain",
+  "crates/flow",
+  "crates/chem-persistence",
+  "crates/chem-providers",
+  "crates/chem-workflow"
 ]
 
 [patch.crates-io]

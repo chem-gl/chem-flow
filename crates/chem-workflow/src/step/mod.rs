@@ -1,3 +1,5 @@
+pub mod context;
 pub mod trait_step;
 
-pub use trait_step::{StepOutput, StepResult, WorkflowStep};
+pub use context::StepContext;
+pub use trait_step::{StepInfo, StepResult, WorkflowStep};
