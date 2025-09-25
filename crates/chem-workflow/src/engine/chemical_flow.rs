@@ -161,21 +161,18 @@ pub trait ChemicalFlowEngine: Send + Sync {
       Err(e) => return Err(e.into()),
     };
     // Only update metadata when the persist was accepted (Ok).
-    match pr {
-      PersistResult::Ok { new_version: _ } => {
-        // Best-effort: ignore metadata errors but prefer to surface
-        // them as warnings in logs (we cannot log here, so ignore).
-        // Persist a lightweight metadata entry indicating the current
-        // step we just wrote. This helps rehydrate to quickly recover
-        // the engine cursor without scanning flow_data.
-        let _ = self.set_metadata("flow_metadata", serde_json::json!({ "current_step": data.cursor }));
-        // Additionally, attempt to persist a full snapshot of the
-        // engine state so rehydration can use it to restore the
-        // complete in-memory state (best-effort; do not fail the
-        // step persist if snapshot saving fails).
-        let _ = self.save_snapshot();
-      }
-      _ => {}
+    if let PersistResult::Ok { new_version: _ } = pr {
+      // Best-effort: ignore metadata errors but prefer to surface
+      // them as warnings in logs (we cannot log here, so ignore).
+      // Persist a lightweight metadata entry indicating the current
+      // step we just wrote. This helps rehydrate to quickly recover
+      // the engine cursor without scanning flow_data.
+      let _ = self.set_metadata("flow_metadata", serde_json::json!({ "current_step": data.cursor }));
+      // Additionally, attempt to persist a full snapshot of the
+      // engine state so rehydration can use it to restore the
+      // complete in-memory state (best-effort; do not fail the
+      // step persist if snapshot saving fails).
+      let _ = self.save_snapshot();
     }
     Ok(pr)
   }
@@ -274,10 +271,10 @@ pub trait ChemicalFlowEngine: Send + Sync {
       }
       Err(_) => {
         // Si no podemos leer la key, intentar fallback igualmente
-          if let Ok(flow_meta) = self.get_flow_repo().get_flow_meta(&self.id()) {
-            let cs = flow_meta.current_cursor as u32;
-            let _ = self.set_current_step(cs);
-          }
+        if let Ok(flow_meta) = self.get_flow_repo().get_flow_meta(&self.id()) {
+          let cs = flow_meta.current_cursor as u32;
+          let _ = self.set_current_step(cs);
+        }
       }
     }
     Ok(())

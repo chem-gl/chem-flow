@@ -71,7 +71,7 @@ impl ChemicalWorkflowFactory {
     if let Ok(meta_val) = engine.get_flow_metadata() {
       let has_cs = meta_val.get("current_step").is_some();
       if !has_cs {
-        if let Ok(flow_meta) = repo_arc.get_flow_meta(&_flow_id) {
+        if let Ok(flow_meta) = repo_arc.get_flow_meta(_flow_id) {
           let cs = flow_meta.current_cursor as u32;
           let _ = engine.set_current_step(cs);
         }

@@ -157,8 +157,8 @@ impl DomainRepository for DieselDomainRepository {
           mols.push(mol);
         }
       }
-        let base = MoleculeFamily::new(mols, serde_json::from_str(&r.provenance).unwrap_or(serde_json::json!({})))?;
-        let mut mf = base;
+      let base = MoleculeFamily::new(mols, serde_json::from_str(&r.provenance).unwrap_or(serde_json::json!({})))?;
+      let mut mf = base;
       if let Some(n) = r.name.clone() {
         mf = mf.with_name(n)?;
       }
@@ -234,8 +234,8 @@ impl DomainRepository for DieselDomainRepository {
           mols.push(mol);
         }
       }
-        let base = MoleculeFamily::new(mols, serde_json::from_str(&r.provenance).unwrap_or(serde_json::json!({})))?;
-        let mut mf = base;
+      let base = MoleculeFamily::new(mols, serde_json::from_str(&r.provenance).unwrap_or(serde_json::json!({})))?;
+      let mut mf = base;
       if let Some(n) = r.name.clone() {
         mf = mf.with_name(n)?;
       }

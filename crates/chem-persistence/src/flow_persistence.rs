@@ -480,10 +480,16 @@ impl FlowRepository for DieselFlowRepository {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     // Obtener el current_cursor del flujo (si no existe devolvemos -1)
-    let parent_row = flows_dsl_local::flows.filter(flows_dsl_local::id.eq(&fid)).first::<FlowRow>(&mut conn).optional().map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    let parent_row = flows_dsl_local::flows.filter(flows_dsl_local::id.eq(&fid))
+                                           .first::<FlowRow>(&mut conn)
+                                           .optional()
+                                           .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
     if let Some(row) = parent_row {
       let current_cursor = row.current_cursor;
-      let c: i64 = map_db_err(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.le(current_cursor))).count().get_result(&mut conn))?;
+      let c: i64 = map_db_err(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid)
+                                                                          .and(data_dsl::cursor.le(current_cursor)))
+                                                 .count()
+                                                 .get_result(&mut conn))?;
       Ok(c)
     } else {
       Ok(-1)
@@ -518,12 +524,16 @@ impl FlowRepository for DieselFlowRepository {
     // Behavior:
     // - keep steps with cursor < from_cursor
     // - delete steps with cursor >= from_cursor for the given flow
-    // - find child branches whose parent_cursor >= from_cursor and delete them recursively
+    // - find child branches whose parent_cursor >= from_cursor and delete them
+    //   recursively
     let mut conn = self.conn()?;
     let fid = _flow_id.to_string();
 
     // Ensure flow exists
-    let exists = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)).select(flows_dsl::id).first::<String>(&mut conn).optional())?;
+    let exists = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))
+                                            .select(flows_dsl::id)
+                                            .first::<String>(&mut conn)
+                                            .optional())?;
     if exists.is_none() {
       return Err(FlowError::NotFound(format!("flow {}", _flow_id)));
     }
@@ -532,12 +542,15 @@ impl FlowRepository for DieselFlowRepository {
     map_db_err(diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(_from_cursor)))).execute(&mut conn))?;
 
     // Find child flows whose parent_cursor >= from_cursor and collect their ids
-    let child_rows: Vec<FlowRow> = map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone())).and(flows_dsl::parent_cursor.ge(_from_cursor))).load::<FlowRow>(&mut conn))?;
+    let child_rows: Vec<FlowRow> =
+      map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
+                                                                  .and(flows_dsl::parent_cursor.ge(_from_cursor)))
+                                 .load::<FlowRow>(&mut conn))?;
     // For each child, call delete_branch to remove subtree
     for child in child_rows {
       if let Ok(child_uuid) = Uuid::parse_str(&child.id) {
         // delete_branch is transactional on its own
-        let _ = self.delete_branch(&child_uuid)?;
+        self.delete_branch(&child_uuid)?;
       }
     }
 

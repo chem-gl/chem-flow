@@ -91,8 +91,10 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
   // StepInfo especial para que la UI pueda regresar al menú de forma
   // amigable.
   if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
-    println!("ℹ️  El paso '{}' ya fue ejecutado para este flow; no hay acciones pendientes.", step_name);
-    return Ok(StepInfo { payload: serde_json::json!({"status": "already_executed", "step": step_name}), metadata: serde_json::json!({}) });
+    println!("ℹ️  El paso '{}' ya fue ejecutado para este flow; no hay acciones pendientes.",
+             step_name);
+    return Ok(StepInfo { payload: serde_json::json!({"status": "already_executed", "step": step_name}),
+                         metadata: serde_json::json!({}) });
   }
 
   let result = if step_name.to_lowercase() == "step2" {
@@ -177,8 +179,8 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
       // moléculas explícitas, no preguntamos la descripción por defecto
       // (usaremos la descripción de la familia seleccionada salvo que el
       // usuario decida cambiarla al introducir un nuevo nombre).
-  let new_name: String;
-  let new_desc: String;
+      let new_name: String;
+      let new_desc: String;
       let single_existing_family = families_opt.as_ref().map(|v| v.len() == 1).unwrap_or(false);
       let has_explicit_mols = mols_opt.is_some();
 
