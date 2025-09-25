@@ -6,16 +6,13 @@ use std::error::Error;
 use std::io::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
-
 fn main() -> Result<(), Box<dyn Error>> {
   // Inicializar repositorio concreto y envolver en objeto trait para que main
   // solo dependa del contrato `FlowRepository`.
   let concrete = chem_persistence::new_flow_from_env().map_err(|e| Box::new(e) as Box<dyn Error>)?;
   let repo: Arc<dyn FlowRepository> = Arc::new(concrete);
-
   run_cli(repo)
 }
-
 fn print_menu() {
   println!("\n== Flow CLI menu ==");
   println!("1) Ver flujos (tabla con id y parent)");
@@ -29,13 +26,11 @@ fn print_menu() {
   println!("10) Eliminar pasos a partir de un cursor (en una rama)");
   println!("8) Salir");
 }
-
 fn run_cli(repo: Arc<dyn FlowRepository>) -> Result<(), Box<dyn Error>> {
   loop {
     print_menu();
     print!("Elige una opción: ");
     io::stdout().flush().ok();
-
     let mut choice = String::new();
     io::stdin().read_line(&mut choice)?;
     match choice.trim() {
@@ -57,7 +52,6 @@ fn run_cli(repo: Arc<dyn FlowRepository>) -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn prompt(msg: &str) -> io::Result<String> {
   print!("{}", msg);
   io::stdout().flush()?;
@@ -65,15 +59,12 @@ fn prompt(msg: &str) -> io::Result<String> {
   io::stdin().read_line(&mut s)?;
   Ok(s)
 }
-
 type FlowEntry = (Uuid, Option<Uuid>, Option<String>, Option<String>);
-
 fn get_flows_and_data(repo: &dyn FlowRepository) -> Result<(Vec<FlowEntry>, Vec<FlowData>), Box<dyn Error>> {
   let (flows, data) = repo.dump_tables_for_debug().map_err(|e| Box::new(e) as Box<dyn Error>)?;
   let mapped: Vec<FlowEntry> = flows.into_iter().map(|f| (f.id, f.parent_flow_id, f.name, f.status)).collect();
   Ok((mapped, data))
 }
-
 fn show_flows_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   match repo.list_flow_ids() {
     Ok(ids) => {
@@ -98,7 +89,6 @@ fn show_flows_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error
     }
   }
 }
-
 fn create_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let name = prompt("Nombre (enter para vacío): ")?;
   let status = prompt("Estado (enter para vacío): ")?;
@@ -110,7 +100,6 @@ fn create_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Erro
   }
   Ok(())
 }
-
 fn create_branch_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, data) = get_flows_and_data(repo)?;
   if flows.is_empty() {
@@ -138,17 +127,12 @@ fn create_branch_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Er
   }
   let cursor_s = prompt("Cursor desde el que crear la rama (número entero): ")?;
   let parent_cursor: i64 = cursor_s.trim().parse().map_err(|_| "Cursor inválido")?;
-  let name = prompt("Nombre de la rama (enter para vacío): ")?;
-  let status = prompt("Estado de la rama (enter para vacío): ")?;
-  let name_opt = if name.trim().is_empty() { None } else { Some(name.trim().to_string()) };
-  let status_opt = if status.trim().is_empty() { None } else { Some(status.trim().to_string()) };
-  match repo.create_branch(&parent_id, name_opt, status_opt, parent_cursor, json!({})) {
+  match repo.create_branch(&parent_id, parent_cursor, json!({})) {
     Ok(id) => println!("Branch creado: {}", id),
     Err(e) => eprintln!("Error creando branch: {}", e),
   }
   Ok(())
 }
-
 fn delete_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let id_s = prompt("Flow id a eliminar (UUID): ")?;
   let id = Uuid::parse_str(id_s.trim()).map_err(|_| "UUID inválido")?;
@@ -163,7 +147,6 @@ fn delete_flow_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Erro
   }
   Ok(())
 }
-
 fn create_step_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, _data) = get_flows_and_data(repo)?;
   if flows.is_empty() {
@@ -208,7 +191,6 @@ fn create_step_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Erro
   }
   Ok(())
 }
-
 fn view_flow_full(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, _data) = get_flows_and_data(repo)?;
   if flows.is_empty() {
@@ -236,7 +218,6 @@ fn view_flow_full(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn print_flow_map(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, _) = get_flows_and_data(repo)?;
   println!("Mapa simple de flujos (parent -> child):");
@@ -246,7 +227,6 @@ fn print_flow_map(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn view_update_status_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, _data) = get_flows_and_data(repo)?;
   if flows.is_empty() {
@@ -280,7 +260,6 @@ fn view_update_status_interactive(repo: &dyn FlowRepository) -> Result<(), Box<d
   }
   Ok(())
 }
-
 fn delete_steps_from_cursor_interactive(repo: &dyn FlowRepository) -> Result<(), Box<dyn Error>> {
   let (flows, data) = get_flows_and_data(repo)?;
   if flows.is_empty() {

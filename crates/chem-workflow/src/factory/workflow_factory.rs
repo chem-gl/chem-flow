@@ -3,14 +3,12 @@ use crate::WorkflowError;
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
-
-// Use the in-memory repositories from the workspace for the factory so the
-// created engines are usable out-of-the-box in examples and tests.
+// Usar los repositorios en memoria del workspace para la fábrica para que
+// los motores creados sean utilizables de inmediato en ejemplos y pruebas.
 use crate::workflow_type::WorkflowType;
 use flow::repository::FlowRepository;
 use std::collections::HashMap;
-// rehydration is delegated to the concrete engine via `rehydrate_with_repos`
-
+// la rehidratación se delega al motor concreto vía `rehydrate_with_repos`
 /// Fábrica para crear o cargar instancias de motores de flujo.
 ///
 /// Provee métodos de creación rápidos que usan repositorios (por defecto
@@ -18,7 +16,6 @@ use std::collections::HashMap;
 /// instancias devueltas implementan `ChemicalFlowEngine` y están listas
 /// para ejecutar pasos localmente.
 pub struct ChemicalWorkflowFactory;
-
 impl ChemicalWorkflowFactory {
   /// Lista todos los flows y sus tipos de workflow.
   /// Retorna un `HashMap` desde el UUID (string) del flow hasta su
@@ -37,7 +34,6 @@ impl ChemicalWorkflowFactory {
     }
     Ok(out)
   }
-
   /// Constructor genérico que crea un nuevo flow y construye el engine
   /// concreto `E` asociado.
   ///
@@ -58,7 +54,6 @@ impl ChemicalWorkflowFactory {
     let engine = E::construct_with_repos(id, repo_arc, domain_arc);
     Ok(Box::new(engine))
   }
-
   /// Carga una instancia apuntando a un `flow_id` existente.
   ///
   /// Intenta rehidratar el motor con el snapshot existente si está
@@ -67,12 +62,21 @@ impl ChemicalWorkflowFactory {
   pub fn load<E>(_flow_id: &Uuid) -> Result<Box<E>, WorkflowError>
     where E: ChemicalFlowEngine + 'static
   {
-    // initialize persistence-backed repos (mandatory)
+    // inicializar repositorios respaldados por persistencia (obligatorio)
     let repo = chem_persistence::new_flow_from_env()?;
     let repo_arc: Arc<dyn FlowRepository> = Arc::new(repo);
     let domain_repo = chem_persistence::new_domain_from_env()?;
     let domain_arc: Arc<dyn chem_domain::DomainRepository> = Arc::new(domain_repo);
-    let engine = E::rehydrate_with_repos(*_flow_id, repo_arc, domain_arc)?;
+    let mut engine = E::rehydrate_with_repos(*_flow_id, repo_arc.clone(), domain_arc)?;
+    if let Ok(meta_val) = engine.get_flow_metadata() {
+      let has_cs = meta_val.get("current_step").is_some();
+      if !has_cs {
+        if let Ok(flow_meta) = repo_arc.get_flow_meta(&_flow_id) {
+          let cs = flow_meta.current_cursor as u32;
+          let _ = engine.set_current_step(cs);
+        }
+      }
+    }
     Ok(Box::new(engine))
   }
 }

@@ -3,7 +3,7 @@ use crate::DomainError;
 use crate::{Molecule, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty};
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 pub struct DomainStubs;
 /// Implementación en memoria para tests y desarrollo.
@@ -23,7 +23,7 @@ impl InMemoryDomainRepository {
   }
 
   // Helper to map poisoned mutex errors into DomainError
-  fn lock_map<'a, T>(&'a self, m: &'a Mutex<T>, name: &str) -> Result<std::sync::MutexGuard<'a, T>, DomainError> {
+  fn lock_map<'a, T>(&'a self, m: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T>, DomainError> {
     m.lock().map_err(|e| DomainError::ExternalError(format!("Mutex '{}' poisoned: {}", name, e)))
   }
 }
@@ -169,7 +169,9 @@ impl DomainStubs {
 mod tests {
   use serde_json::json;
 
-  use crate::{DomainError, DomainRepository, InMemoryDomainRepository, OwnedFamilyProperty, OwnedMolecularProperty};
+  use crate::{
+    DomainError, DomainRepository, InMemoryDomainRepository, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty,
+  };
 
   #[test]
   fn save_and_get_family() -> Result<(), DomainError> {
@@ -215,7 +217,7 @@ mod tests {
     let _m_key = repo.save_molecule(m.clone())?;
 
     // Crear familia
-    let family = crate::MoleculeFamily::new(vec![m.clone()], json!({"test": true}))?;
+    let family = MoleculeFamily::new(vec![m.clone()], json!({"test": true}))?;
     let f_id = repo.save_family(family.clone())?;
 
     // Guardar propiedad molecular
