@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::workflow_type::WorkflowType;
 use flow::repository::FlowRepository;
 use std::collections::HashMap;
-// la rehidratación se delega al motor concreto vía `rehydrate_with_repos`
+// la rehidratación se delega al motor concreto vía `rehydrate`
 /// Fábrica para crear o cargar instancias de motores de flujo.
 ///
 /// Provee métodos de creación rápidos que usan repositorios (por defecto
@@ -58,7 +58,7 @@ impl ChemicalWorkflowFactory {
   ///
   /// Intenta rehidratar el motor con el snapshot existente si está
   /// disponible; la rehidratación concreta la realiza la implementación
-  /// del engine en `E::rehydrate_with_repos`.
+  /// del engine en `E::rehydrate`.
   pub fn load<E>(_flow_id: &Uuid) -> Result<Box<E>, WorkflowError>
     where E: ChemicalFlowEngine + 'static
   {
@@ -67,13 +67,13 @@ impl ChemicalWorkflowFactory {
     let repo_arc: Arc<dyn FlowRepository> = Arc::new(repo);
     let domain_repo = chem_persistence::new_domain_from_env()?;
     let domain_arc: Arc<dyn chem_domain::DomainRepository> = Arc::new(domain_repo);
-    let mut engine = E::rehydrate_with_repos(*_flow_id, repo_arc.clone(), domain_arc)?;
-    if let Ok(meta_val) = engine.get_flow_metadata() {
+  let engine = E::rehydrate(*_flow_id, repo_arc.clone(), domain_arc)?;
+    if let Ok(meta_val) = engine.get_metadata("flow_metadata") {
       let has_cs = meta_val.get("current_step").is_some();
       if !has_cs {
         if let Ok(flow_meta) = repo_arc.get_flow_meta(_flow_id) {
           let cs = flow_meta.current_cursor as u32;
-          let _ = engine.set_current_step(cs);
+          let _ = engine.set_metadata("flow_metadata", json!({ "current_step": cs }));
         }
       }
     }
