@@ -4,7 +4,6 @@ CREATE TABLE IF NOT EXISTS molecules (
   inchi TEXT NOT NULL,
   metadata TEXT
 );
-
 CREATE TABLE IF NOT EXISTS families (
   id TEXT PRIMARY KEY,
   name TEXT,
@@ -13,7 +12,6 @@ CREATE TABLE IF NOT EXISTS families (
   provenance TEXT NOT NULL,
   frozen BOOLEAN NOT NULL DEFAULT TRUE
 );
-
 CREATE TABLE IF NOT EXISTS family_properties (
   id TEXT PRIMARY KEY,
   family_id TEXT NOT NULL,
@@ -24,7 +22,6 @@ CREATE TABLE IF NOT EXISTS family_properties (
   value_hash TEXT NOT NULL,
   metadata TEXT
 );
-
 CREATE TABLE IF NOT EXISTS molecular_properties (
   id TEXT PRIMARY KEY,
   molecule_inchikey TEXT NOT NULL,
@@ -35,7 +32,6 @@ CREATE TABLE IF NOT EXISTS molecular_properties (
   value_hash TEXT NOT NULL,
   metadata TEXT
 );
-
 CREATE TABLE IF NOT EXISTS family_members (
   id TEXT PRIMARY KEY,
   family_id TEXT NOT NULL,

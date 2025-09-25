@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS flows (
   parent_cursor BIGINT,
   metadata TEXT
 );
-
 CREATE TABLE IF NOT EXISTS flow_data (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,
@@ -21,7 +20,6 @@ CREATE TABLE IF NOT EXISTS flow_data (
   command_id TEXT,
   created_at_ts BIGINT
 );
-
 CREATE TABLE IF NOT EXISTS snapshots (
   id TEXT PRIMARY KEY,
   flow_id TEXT NOT NULL,

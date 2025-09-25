@@ -1,11 +1,9 @@
 name: CI - tests and coverage
-
 on:
   push:
     branches: [main, master]
   pull_request:
     branches: [main, master]
-
 jobs:
   test:
     name: Build image, run tests and coverage in Docker
@@ -14,31 +12,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup cache dir
         run: mkdir -p ${{ github.workspace }}/.cache/flow
-
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ${{ github.workspace }}/.cache/flow/cargo/registry
           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Cache cargo git
         uses: actions/cache@v4
         with:
           path: |
             ${{ github.workspace }}/.cache/flow/cargo/git
           key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
-
       - name: Cache cargo target
         uses: actions/cache@v4
         with:
           path: |
             ${{ github.workspace }}/.cache/flow/target
           key: ${{ runner.os }}-cargo-target-${{ github.sha }}
-
       - name: Cache conda pkgs and pip cache
         uses: actions/cache@v4
         with:
@@ -46,13 +39,11 @@ jobs:
             ${{ github.workspace }}/.cache/flow/conda_pkgs
             ${{ github.workspace }}/.cache/flow/pip
           key: ${{ runner.os }}-python-pkgs-${{ hashFiles('crates/chem-providers/requirements.txt') }}
-
       - name: Build Docker images
         run: |
           # Construimos la imagen dev (contiene cargo) y la runtime
           docker build -t flow-chem-ci-dev --target base --build-arg FEATURES="" -f Dockerfile .
           docker build -t flow-chem-ci --build-arg FEATURES="" -f Dockerfile .
-
       - name: Run coverage script inside Docker (generates coverage/ and enforces 90%)
         env:
           HOST_CACHE_DIR: ${{ github.workspace }}/.cache/flow
@@ -61,13 +52,11 @@ jobs:
           # generate_coverage.sh runs tarpaulin with --fail-under 90; the step will
           # fail the job if overall coverage is below 90%.
           ./scripts/generate_coverage.sh
-
       - name: Upload coverage report (lcov only)
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage/lcov.info
-
       - name: List coverage files (for debug)
         run: |
           echo "Coverage files:"; ls -la coverage || true

@@ -9,3 +9,5 @@ newline_style = "Unix"
 use_small_heuristics = "Max"
 format_strings = true
 fn_call_width = 80
+
+

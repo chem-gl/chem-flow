@@ -5,7 +5,6 @@ mod family_property;
 mod molecular_property;
 mod molecule;
 mod molecule_family;
-
 pub use domain_repository::DomainRepository;
 pub use domain_repository::{OwnedFamilyProperty, OwnedMolecularProperty};
 pub use domain_stubs::{DomainStubs, InMemoryDomainRepository};

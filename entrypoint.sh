@@ -1,6 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-
 # entrypoint: wait for DATABASE_URL target to be reachable before execing command
 if [ -n "${DATABASE_URL:-}" ]; then
   PYTHON_EXEC="${PYO3_PYTHON:-/opt/conda/bin/python}"
@@ -25,6 +24,5 @@ while time.time()<end:
 sys.exit(1)
 PY
 fi
-
 # exec provided command
 exec "$@"

@@ -528,7 +528,6 @@ impl FlowRepository for DieselFlowRepository {
     //   recursively
     let mut conn = self.conn()?;
     let fid = _flow_id.to_string();
-
     // Ensure flow exists
     let exists = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))
                                             .select(flows_dsl::id)
@@ -537,10 +536,8 @@ impl FlowRepository for DieselFlowRepository {
     if exists.is_none() {
       return Err(FlowError::NotFound(format!("flow {}", _flow_id)));
     }
-
     // Delete flow_data with cursor >= from_cursor
     map_db_err(diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(_from_cursor)))).execute(&mut conn))?;
-
     // Find child flows whose parent_cursor >= from_cursor and collect their ids
     let child_rows: Vec<FlowRow> =
       map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
@@ -553,7 +550,6 @@ impl FlowRepository for DieselFlowRepository {
         self.delete_branch(&child_uuid)?;
       }
     }
-
     Ok(())
   }
   fn lock_for_update(&self, _flow_id: &Uuid, _expected_version: i64) -> FlowResult<bool> {

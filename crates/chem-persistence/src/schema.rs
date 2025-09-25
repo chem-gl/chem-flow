@@ -1,8 +1,6 @@
 // Simplified Diesel schema for SQLite used in tests.
 // Tablas: flows, flow_data, snapshots
-
 use diesel::allow_tables_to_appear_in_same_query;
-
 diesel::table! {
     flows (id) {
         id -> Text,
@@ -17,7 +15,6 @@ diesel::table! {
         metadata -> Text,
     }
 }
-
 diesel::table! {
     flow_data (id) {
         id -> Text,
@@ -30,7 +27,6 @@ diesel::table! {
         created_at_ts -> BigInt,
     }
 }
-
 diesel::table! {
     snapshots (id) {
         id -> Text,
@@ -41,9 +37,7 @@ diesel::table! {
         created_at_ts -> BigInt,
     }
 }
-
 allow_tables_to_appear_in_same_query!(flows, flow_data, snapshots);
-
 diesel::table! {
     molecules (inchikey) {
         inchikey -> Text,
@@ -52,7 +46,6 @@ diesel::table! {
         metadata -> Text,
     }
 }
-
 diesel::table! {
     families (id) {
         id -> Text,
@@ -63,7 +56,6 @@ diesel::table! {
         frozen -> Bool,
     }
 }
-
 diesel::table! {
     family_properties (id) {
         id -> Text,
@@ -76,7 +68,6 @@ diesel::table! {
         metadata -> Text,
     }
 }
-
 diesel::table! {
     molecular_properties (id) {
         id -> Text,
@@ -89,7 +80,6 @@ diesel::table! {
         metadata -> Text,
     }
 }
-
 diesel::table! {
     family_members (id) {
         id -> Text,
@@ -97,5 +87,4 @@ diesel::table! {
         molecule_inchikey -> Text,
     }
 }
-
 allow_tables_to_appear_in_same_query!(molecules, families, family_properties, molecular_properties, family_members);

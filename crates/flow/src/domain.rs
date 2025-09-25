@@ -6,7 +6,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
 /// Registro de datos del flujo (`FlowData`).
 ///
 /// `FlowData` representa un evento o registro persistente asociado a un
@@ -35,7 +34,6 @@ pub struct FlowData {
   /// Marca temporal de creación.
   pub created_at: DateTime<Utc>,
 }
-
 /// Metadata de snapshot: metadata en Postgres y `state_ptr` apunta a blob
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SnapshotMeta {
@@ -46,7 +44,6 @@ pub struct SnapshotMeta {
   pub metadata: serde_json::Value,
   pub created_at: DateTime<Utc>,
 }
-
 /// Metadatos ligeros del agregado `flow` guardados en Postgres.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowMeta {
@@ -63,7 +60,6 @@ pub struct FlowMeta {
   pub parent_cursor: Option<i64>,
   pub metadata: serde_json::Value,
 }
-
 /// Resultado de operaciones de persistencia que requieren control de versiones.
 #[derive(Debug, Clone)]
 pub enum PersistResult {
@@ -73,7 +69,6 @@ pub enum PersistResult {
   },
   Conflict,
 }
-
 /// Item de trabajo que un worker puede reclamar. Contiene referencias para
 /// rehidratación (último cursor y pointer a snapshot si existe).
 #[derive(Debug, Clone)]

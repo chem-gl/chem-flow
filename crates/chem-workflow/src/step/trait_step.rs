@@ -79,19 +79,20 @@ macro_rules! impl_workflow_step {
     }
   };
   // Variante con implementación inline del método run_typed
-  ($step_ty:ident, $payload:ty, $metadata:ty, $input:ty, |$ctx_ident:ident, $input_ident:ident| $body:block) => {
+  // Variant that accepts an explicit `self` identifier plus ctx and input
+  ($step_ty:ident, $payload:ty, $metadata:ty, $input:ty, |$self_ident:ident, $ctx_ident:ident, $input_ident:ident| $body:block) => {
     impl $step_ty {
       pub fn run_typed(&self, $ctx_ident: &$crate::step::StepContext, $input_ident: $input) -> $crate::step::StepResult {
+        let $self_ident = self;
         $body
       }
     }
     $crate::impl_workflow_step!($step_ty, $payload, $metadata, $input);
   };
-  // Variante que expone `self` como el primer identificador en la clausura
-  ($step_ty:ident, $payload:ty, $metadata:ty, $input:ty, |$self_ident:ident, $ctx_ident:ident, $input_ident:ident| $body:block) => {
+  // Variante con implementación inline del método run_typed (ctx, input only)
+  ($step_ty:ident, $payload:ty, $metadata:ty, $input:ty, |$ctx_ident:ident, $input_ident:ident| $body:block) => {
     impl $step_ty {
       pub fn run_typed(&self, $ctx_ident: &$crate::step::StepContext, $input_ident: $input) -> $crate::step::StepResult {
-        let $self_ident = self;
         $body
       }
     }

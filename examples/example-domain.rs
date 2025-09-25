@@ -8,7 +8,6 @@ use std::error::Error;
 use std::io::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
-
 fn main() -> Result<(), Box<dyn Error>> {
   // Create repository using crate-provided helper that chooses and validates
   // the backend (Postgres vs Sqlite) based on build features and
@@ -21,7 +20,6 @@ fn main() -> Result<(), Box<dyn Error>> {
       std::process::exit(1);
     }
   };
-
   loop {
     print_menu();
     let choice = prompt("Seleccione una opción: ")?;
@@ -45,10 +43,8 @@ fn main() -> Result<(), Box<dyn Error>> {
       other => println!("Opción inválida: {}", other),
     }
   }
-
   Ok(())
 }
-
 fn print_menu() {
   println!("\n=== Ejemplo: chem-domain (dominio) ===");
   println!("1) Crear molécula desde partes (inchikey, smiles, inchi)");
@@ -65,7 +61,6 @@ fn print_menu() {
   println!("12) Listar todas las moléculas (para selección en otras opciones)");
   println!("q) Salir");
 }
-
 fn prompt(msg: &str) -> io::Result<String> {
   print!("{}", msg);
   io::stdout().flush()?;
@@ -73,7 +68,6 @@ fn prompt(msg: &str) -> io::Result<String> {
   io::stdin().read_line(&mut s)?;
   Ok(s.trim_end().to_string())
 }
-
 fn list_all_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   match repo.list_molecules() {
     Ok(mols) => {
@@ -91,6 +85,37 @@ fn list_all_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Bo
   Ok(())
 }
 
+// Helper: devuelve valores mock por método y propiedad (usado en el ejemplo)
+fn mock_value_for_method(method: &str, prop: &str) -> Option<f64> {
+  match method {
+    "Random1" => match prop {
+      "LogP" => Some(2.5),
+      "PSA" => Some(45.0),
+      "AtX" => Some(24.0),
+      "HBA" => Some(3.0),
+      "HBD" => Some(1.0),
+      "RB" => Some(5.0),
+      "MR" => Some(60.0),
+      _ => None,
+    },
+    "Random2" => match prop {
+      "LD50" => Some(350.0),
+      "Mutagenicity" => Some(0.0),
+      "DevelopmentalToxicity" => Some(0.0),
+      "SyntheticAccessibility" => Some(3.2),
+      _ => None,
+    },
+    "Random3" => match prop {
+      "HBD" => Some(2.0),
+      "RB" => Some(3.0),
+      "MR" => Some(72.0),
+      "LD50" => Some(250.0),
+      "Mutagenicity" => Some(1.0),
+      _ => None,
+    },
+    _ => None,
+  }
+}
 fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey: ")?;
   let smiles = prompt("SMILES: ")?;
@@ -98,7 +123,6 @@ fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box
   let meta_s = prompt("Metadatos (JSON, opcional, enter para vacio): ")?;
   let metadata: JsonValue =
     if meta_s.trim().is_empty() { json!({}) } else { serde_json::from_str(&meta_s).unwrap_or(json!({"raw": meta_s})) };
-
   match Molecule::from_parts(&inchikey, &smiles, &inchi, metadata) {
     Ok(m) => match repo.save_molecule(m.clone()) {
       Ok(key) => println!("Molécula guardada con InChIKey={}", key),
@@ -106,10 +130,8 @@ fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box
     },
     Err(e) => println!("Error creando molécula: {:?}", e),
   }
-
   Ok(())
 }
-
 fn create_from_smiles(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let smiles = prompt("SMILES: ")?;
   println!("Creando molécula desde SMILES (puede fallar si no hay motor químico)...");
@@ -124,52 +146,144 @@ fn create_from_smiles(repo: &dyn chem_domain::DomainRepository) -> Result<(), Bo
       other => println!("Error al crear molécula: {:?}", other),
     },
   }
-
   Ok(())
 }
-
 fn add_property_interactive(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula a la que agregar la propiedad: ")?;
   match repo.get_molecule(&inchikey) {
     Ok(Some(_m)) => {
-      let prop_type = prompt("Tipo de propiedad (ej. logP): ")?;
-      let val_s = prompt("Valor (si es JSON puede ingresarlo, ej. 1.23 o \"text\" o { \"a\":1 }): ")?;
-      let value: JsonValue = serde_json::from_str(&val_s).unwrap_or(json!(val_s));
-      let quality = prompt("Quality (opcional): ")?;
-      let quality_opt = if quality.trim().is_empty() { None } else { Some(quality) };
-      let pref = prompt("Preferred? (y/N): ")?;
-      let preferred = matches!(pref.trim().to_lowercase().as_str(), "y" | "yes");
-      let meta_s = prompt("Metadatos para la propiedad (JSON, opcional): ")?;
-      let metadata: JsonValue =
-        if meta_s.trim().is_empty() { json!({}) } else { serde_json::from_str(&meta_s).unwrap_or(json!({"raw": meta_s})) };
+      // Nuevo flujo interactivo: elegir modo de entrada
+      println!("Modo de entrada para propiedades:");
+      println!("1) Ingresar UNA propiedad (modo clásico)");
+      println!("2) Generar propiedades por MÉTODO mock (Random1/Random2/Random3/Random4)");
+      println!("3) Ingresar MANUALMENTE valores para TODAS las propiedades requeridas");
+      let mode = prompt("Seleccione modo (1/2/3): ")?;
 
-      // compute simple value_hash using blake3
-      let value_raw = value.to_string();
-      let mut hasher = Sha256::new();
-      hasher.update(value_raw.as_bytes());
-      let value_hash = format!("{:x}", hasher.finalize());
+      // listado de propiedades (coincide con ADMETSA)
+      let properties = vec!["LogP",
+                            "PSA",
+                            "AtX",
+                            "HBA",
+                            "HBD",
+                            "RB",
+                            "MR",
+                            "LD50",
+                            "Mutagenicity",
+                            "DevelopmentalToxicity",
+                            "SyntheticAccessibility"];
 
-      let prop = OwnedMolecularProperty { id: Uuid::new_v4(),
-                                          molecule_inchikey: inchikey.clone(),
-                                          property_type: prop_type,
-                                          value,
-                                          quality: quality_opt,
-                                          preferred,
-                                          value_hash,
-                                          metadata };
+      match mode.trim() {
+        "1" => {
+          // Modo clásico: una propiedad
+          let prop_type = prompt("Tipo de propiedad (ej. LogP): ")?;
+          let val_s = prompt("Valor (si es JSON puede ingresarlo, ej. 1.23 o \"text\" o { \"a\":1 }): ")?;
+          let value: JsonValue = serde_json::from_str(&val_s).unwrap_or(json!(val_s));
+          let quality = prompt("Quality (opcional): ")?;
+          let quality_opt = if quality.trim().is_empty() { None } else { Some(quality) };
+          let pref = prompt("Preferred? (y/N): ")?;
+          let preferred = matches!(pref.trim().to_lowercase().as_str(), "y" | "yes");
+          let meta_s = prompt("Metadatos para la propiedad (JSON, opcional): ")?;
+          let metadata: JsonValue = if meta_s.trim().is_empty() {
+            json!({})
+          } else {
+            serde_json::from_str(&meta_s).unwrap_or(json!({"raw": meta_s}))
+          };
+          // compute simple value_hash using sha256
+          let value_raw = value.to_string();
+          let mut hasher = Sha256::new();
+          hasher.update(value_raw.as_bytes());
+          let value_hash = format!("{:x}", hasher.finalize());
+          let prop = OwnedMolecularProperty { id: Uuid::new_v4(),
+                                              molecule_inchikey: inchikey.clone(),
+                                              property_type: prop_type,
+                                              value,
+                                              quality: quality_opt,
+                                              preferred,
+                                              value_hash,
+                                              metadata };
+          match repo.save_molecular_property(prop) {
+            Ok(id) => println!("Propiedad guardada con id={}", id),
+            Err(e) => println!("Error guardando propiedad: {:?}", e),
+          }
+        }
+        "2" => {
+          // Generar por método mock
+          println!("Métodos disponibles: 1=Random1 2=Random2 3=Random3 4=Random4");
+          let m = prompt("Seleccione método (1-4): ")?;
+          let method_name = match m.trim() {
+            "1" => "Random1",
+            "2" => "Random2",
+            "3" => "Random3",
+            "4" => "Random4",
+            other => {
+              println!("Opción inválida: {}", other);
+              return Ok(());
+            }
+          };
 
-      match repo.save_molecular_property(prop) {
-        Ok(id) => println!("Propiedad guardada con id={}", id),
-        Err(e) => println!("Error guardando propiedad: {:?}", e),
+          // Generar y guardar todas las propiedades que el método mock produce
+          for &prop in properties.iter() {
+            // calcular mock
+            let val = match mock_value_for_method(method_name, prop) {
+              Some(v) => json!(v),
+              None => continue, // este método no genera esa propiedad
+            };
+            let value_raw = val.to_string();
+            let mut hasher = Sha256::new();
+            hasher.update(value_raw.as_bytes());
+            let value_hash = format!("{:x}", hasher.finalize());
+            let meta = json!({"method": method_name});
+            let prop_obj = OwnedMolecularProperty { id: Uuid::new_v4(),
+                                                    molecule_inchikey: inchikey.clone(),
+                                                    property_type: prop.to_string(),
+                                                    value: val,
+                                                    quality: Some("calculated".to_string()),
+                                                    preferred: true,
+                                                    value_hash,
+                                                    metadata: meta };
+            match repo.save_molecular_property(prop_obj) {
+              Ok(id) => println!("Guardada {} -> id={}", prop, id),
+              Err(e) => println!("Error guardando {}: {:?}", prop, e),
+            }
+          }
+        }
+        "3" => {
+          // Manual: pedir valor para cada propiedad en un for
+          println!("Ingresar valores manuales para todas las propiedades (enter para omitir una)");
+          for &prop in properties.iter() {
+            let prompt_msg = format!("Valor para {} (enter para omitir): ", prop);
+            let v = prompt(&prompt_msg)?;
+            if v.trim().is_empty() {
+              continue;
+            }
+            // tratar de parsear JSON; si falla usar string
+            let value: JsonValue = serde_json::from_str(&v).unwrap_or(json!(v));
+            let mut hasher = Sha256::new();
+            hasher.update(value.to_string().as_bytes());
+            let value_hash = format!("{:x}", hasher.finalize());
+            let meta = json!({"method": "Manual"});
+            let prop_obj = OwnedMolecularProperty { id: Uuid::new_v4(),
+                                                    molecule_inchikey: inchikey.clone(),
+                                                    property_type: prop.to_string(),
+                                                    value,
+                                                    quality: Some("manual".to_string()),
+                                                    preferred: true,
+                                                    value_hash,
+                                                    metadata: meta };
+            match repo.save_molecular_property(prop_obj) {
+              Ok(id) => println!("Guardada {} -> id={}", prop, id),
+              Err(e) => println!("Error guardando {}: {:?}", prop, e),
+            }
+          }
+        }
+        other => println!("Modo desconocido: {}", other),
       }
     }
     Ok(None) => println!("No existe la molécula con InChIKey={}", inchikey),
     Err(e) => println!("Error accediendo al repo: {:?}", e),
   }
-
   Ok(())
 }
-
 fn show_molecule_and_props(repo: &dyn DomainRepository) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey: ")?;
   match repo.get_molecule(&inchikey) {
@@ -195,13 +309,11 @@ fn show_molecule_and_props(repo: &dyn DomainRepository) -> Result<(), Box<dyn Er
   }
   Ok(())
 }
-
 fn create_family_from_one(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula inicial para la familia: ")?;
   let meta_s = prompt("Metadatos de la familia (JSON, opcional): ")?;
   let metadata: JsonValue =
     if meta_s.trim().is_empty() { json!({}) } else { serde_json::from_str(&meta_s).unwrap_or(json!({"raw": meta_s})) };
-
   match repo.get_molecule(&inchikey) {
     Ok(Some(m)) => match MoleculeFamily::new(vec![m.clone()], metadata) {
       Ok(fam) => match repo.save_family(fam.clone()) {
@@ -215,11 +327,9 @@ fn create_family_from_one(repo: &dyn chem_domain::DomainRepository) -> Result<()
   }
   Ok(())
 }
-
 fn add_molecule_to_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a la que agregar la molécula: ")?;
   let inchikey = prompt("InChIKey de la molécula a agregar: ")?;
-
   let fam_id = match Uuid::parse_str(&fam_id_s) {
     Ok(u) => u,
     Err(_) => {
@@ -227,7 +337,6 @@ fn add_molecule_to_family(repo: &dyn chem_domain::DomainRepository) -> Result<()
       return Ok(());
     }
   };
-
   match repo.get_family(&fam_id) {
     Ok(Some(fam)) => match repo.get_molecule(&inchikey) {
       Ok(Some(m)) => match fam.add_molecule(m) {
@@ -243,10 +352,8 @@ fn add_molecule_to_family(repo: &dyn chem_domain::DomainRepository) -> Result<()
     Ok(None) => println!("Familia no encontrada: {}", fam_id_s),
     Err(e) => println!("Error al obtener familia: {:?}", e),
   }
-
   Ok(())
 }
-
 fn list_families_show_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   match repo.list_families() {
     Ok(fams) => {
@@ -262,7 +369,6 @@ fn list_families_show_molecules(repo: &dyn chem_domain::DomainRepository) -> Res
   }
   Ok(())
 }
-
 fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a mostrar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {
@@ -272,7 +378,6 @@ fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn E
       return Ok(());
     }
   };
-
   match repo.get_family(&fam_id) {
     Ok(Some(f)) => {
       println!("Familia id={} tamaño={} provenance={}", f.id(), f.len(), f.provenance());
@@ -287,7 +392,6 @@ fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn E
         }
         Err(e) => println!("Error obteniendo propiedades de la familia: {:?}", e),
       }
-
       println!("Moléculas en la familia:");
       for m in f.molecules() {
         println!("- InChIKey={} SMILES={} InChI={} metadata={}",
@@ -309,10 +413,8 @@ fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn E
     Ok(None) => println!("Familia no encontrada: {}", fam_id_s),
     Err(e) => println!("Error al obtener familia: {:?}", e),
   }
-
   Ok(())
 }
-
 fn remove_molecule_from_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia de la que quitar la molécula: ")?;
   let inchikey = prompt("InChIKey de la molécula a quitar: ")?;
@@ -323,14 +425,12 @@ fn remove_molecule_from_family(repo: &dyn chem_domain::DomainRepository) -> Resu
       return Ok(());
     }
   };
-
   match repo.remove_molecule_from_family(&fam_id, &inchikey) {
     Ok(new_id) => println!("Se creó nueva versión de la familia con id={}", new_id),
     Err(e) => println!("Error removiendo molécula de la familia: {:?}", e),
   }
   Ok(())
 }
-
 fn delete_molecule(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula a eliminar: ")?;
   match repo.delete_molecule(&inchikey) {
@@ -339,7 +439,6 @@ fn delete_molecule(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<d
   }
   Ok(())
 }
-
 fn delete_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a eliminar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {

@@ -2,7 +2,6 @@ use pyo3::PyErr;
 use thiserror::Error;
 pub mod core;
 pub use core::Molecule;
-
 #[derive(Debug, Error)]
 pub enum EngineError {
   #[error("Error inicializando Python/RDKit: {0}")]
@@ -10,12 +9,10 @@ pub enum EngineError {
   #[error("Error obteniendo molécula: {0}")]
   GetMolecule(PyErr),
 }
-
 /// Motor químico que proporciona acceso a funcionalidades de RDKit vía Python
 pub struct ChemEngine {
   _private: (),
 }
-
 impl ChemEngine {
   pub fn init() -> Result<Self, EngineError> {
     core::init_python().map_err(EngineError::Init)?;
@@ -26,7 +23,6 @@ impl ChemEngine {
     Ok(molecule)
   }
 }
-
 #[cfg(test)]
 mod tests {
   use super::*;

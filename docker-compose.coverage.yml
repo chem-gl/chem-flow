@@ -1,5 +1,4 @@
 version: "3.8"
-
 services:
   # Servicio ligero cuya única responsabilidad es crear y mantener los
   # volúmenes necesarios para acelerar builds/coverage. Mantenerlo en
@@ -14,7 +13,6 @@ services:
       - flow_conda_pkgs:/opt/conda/pkgs
       - flow_pip_cache:/root/.cache/pip
     restart: unless-stopped
-
   # Runner que usa la etapa 'base' (builder) del Dockerfile y ejecuta
   # el script de coverage montando los volúmenes de cache.
   coverage-runner:

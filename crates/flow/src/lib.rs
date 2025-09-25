@@ -47,13 +47,11 @@
 //!   3) Leer los `FlowData` relevantes con `FlowRepository::read_data(flow_id,
 //!      from_cursor)` y aplicar (replay) esos eventos sobre el estado
 //!      reconstruido si el snapshot no estaba completo hasta el cursor deseado.
-
 pub mod domain;
 pub mod engine;
 pub mod errors;
 pub mod repository;
 pub mod stubs;
-
 pub use domain::*;
 pub use engine::*;
 pub use errors::*;

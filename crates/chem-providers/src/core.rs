@@ -4,7 +4,6 @@ use pyo3::types::{PyDict, PyModule};
 use serde::Deserialize;
 use std::ffi::CString;
 use std::sync::OnceLock;
-
 static RDKIT_MODULE: OnceLock<Py<PyModule>> = OnceLock::new();
 pub fn init_python() -> PyResult<()> {
   Python::attach(|py| {
@@ -15,7 +14,6 @@ pub fn init_python() -> PyResult<()> {
     Ok(())
   })
 }
-
 fn get_module(py: Python<'_>) -> PyResult<Py<PyModule>> {
   RDKIT_MODULE.get().map(|module| module.clone_ref(py)).ok_or_else(|| {
                                                          PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
@@ -23,7 +21,6 @@ fn get_module(py: Python<'_>) -> PyResult<Py<PyModule>> {
         )
                                                        })
 }
-
 #[derive(Debug, Deserialize)]
 /// Representa una molécula obtenida desde RDKit con propiedades básicas
 pub struct Molecule {
@@ -40,7 +37,6 @@ pub struct Molecule {
   /// Fórmula molecular
   pub mol_formula: String,
 }
-
 pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
   Python::attach(|py| {
     let rdkit_py = get_module(py)?;

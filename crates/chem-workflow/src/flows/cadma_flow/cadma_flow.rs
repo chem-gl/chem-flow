@@ -4,7 +4,10 @@
 // Esta implementación es intencionalmente mínima y delega la mayor
 // parte de la lógica común al trait `ChemicalFlowEngine` mediante la
 // macro `impl_chemical_flow!`.
-use crate::{flows::cadma_flow::steps::FamilyReferenceStep1, WorkflowType};
+use crate::{
+  flows::cadma_flow::steps::{ADMETSAPropertiesStep2, FamilyReferenceStep1},
+  WorkflowType,
+};
 use chem_domain::DomainRepository;
 use flow::repository::FlowRepository;
 use serde::{Deserialize, Serialize};
@@ -26,7 +29,6 @@ impl Default for CadmaState {
                  status: "not_started".to_string() }
   }
 }
-
 #[derive(Clone)]
 pub struct CadmaFlow {
   pub id: Uuid,
@@ -34,4 +36,4 @@ pub struct CadmaFlow {
   pub flow_repo: Arc<dyn FlowRepository>,
   pub domain_repo: Arc<dyn DomainRepository>,
 }
-crate::impl_chemical_flow!(CadmaFlow, CadmaState, WorkflowType::Cadma, { 0 => FamilyReferenceStep1 });
+crate::impl_chemical_flow!(CadmaFlow, CadmaState, WorkflowType::Cadma, { 0 => FamilyReferenceStep1, 1 => ADMETSAPropertiesStep2 });

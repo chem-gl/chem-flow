@@ -1,13 +1,10 @@
 #![cfg(not(feature = "pg"))]
-
 use chem_persistence::DieselFlowRepository;
-use flow::repository::FlowRepository;
-
 use chrono::Utc;
 use flow::domain::FlowData;
+use flow::repository::FlowRepository;
 use serde_json::json;
 use uuid::Uuid;
-
 // Cuando el crate se compila con la feature `pg`, el harness de tests puede
 // seguir siendo compilado como test de integración. Proporcionar dos variantes
 // `setup_repo` para que se use el constructor correcto dependiendo de la
@@ -20,7 +17,6 @@ fn setup_repo() -> DieselFlowRepository {
   std::env::set_var("DATABASE_URL", &url);
   DieselFlowRepository::new(&url)
 }
-
 #[cfg(feature = "pg")]
 fn setup_repo() -> DieselFlowRepository {
   // Para builds con feature `pg`, intentar usar el constructor PG. El runner de
@@ -31,7 +27,6 @@ fn setup_repo() -> DieselFlowRepository {
   let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for pg tests");
   DieselFlowRepository::new_pg(&url).expect("create pg repo")
 }
-
 #[test]
 fn test_create_and_persist_flow_data_and_branching() {
   let repo = setup_repo();
@@ -66,7 +61,6 @@ fn test_create_and_persist_flow_data_and_branching() {
   // branch should have 2 steps
   let count = repo.count_steps(&branch_id).expect("count");
   assert_eq!(count, 2);
-
   // --- crear y eliminar rama temporal ---
   let temp_branch =
     repo.create_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({})).expect("create temp");
@@ -87,7 +81,6 @@ fn test_create_and_persist_flow_data_and_branching() {
   // eliminar
   repo.delete_branch(&temp_branch).expect("delete branch");
   assert!(!repo.branch_exists(&temp_branch).unwrap());
-
   // Dump final tables para inspección manual
   let (flows, data) = repo.dump_tables_for_debug().expect("dump");
   println!("flows dump: {} rows", flows.len());
@@ -101,7 +94,6 @@ fn test_create_and_persist_flow_data_and_branching() {
              d.flow_id, d.cursor, d.key, d.payload);
   }
 }
-
 #[test]
 fn child_preserves_steps_after_parent_deletion_sqlite() {
   let repo = setup_repo();
@@ -126,7 +118,6 @@ fn child_preserves_steps_after_parent_deletion_sqlite() {
   let child = repo.create_branch(&parent, Some("child-sql".into()), None, 5, json!({})).expect("branch");
   #[cfg(not(feature = "pg"))]
   assert_eq!(repo.count_steps(&child).unwrap(), 5);
-
   // delete parent; child should remain with its cloned steps
   repo.delete_branch(&parent).expect("delete parent");
   assert!(!repo.branch_exists(&parent).unwrap());

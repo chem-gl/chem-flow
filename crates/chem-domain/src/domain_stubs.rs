@@ -13,7 +13,6 @@ pub struct InMemoryDomainRepository {
   family_properties: Arc<Mutex<HashMap<Uuid, OwnedFamilyProperty>>>,
   molecular_properties: Arc<Mutex<HashMap<Uuid, OwnedMolecularProperty>>>,
 }
-
 impl InMemoryDomainRepository {
   pub fn new() -> Self {
     Self { families: Arc::new(Mutex::new(HashMap::new())),
@@ -21,13 +20,11 @@ impl InMemoryDomainRepository {
            family_properties: Arc::new(Mutex::new(HashMap::new())),
            molecular_properties: Arc::new(Mutex::new(HashMap::new())) }
   }
-
   // Helper to map poisoned mutex errors into DomainError
   fn lock_map<'a, T>(&'a self, m: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T>, DomainError> {
     m.lock().map_err(|e| DomainError::ExternalError(format!("Mutex '{}' poisoned: {}", name, e)))
   }
 }
-
 impl DomainRepository for InMemoryDomainRepository {
   fn save_family(&self, family: MoleculeFamily) -> Result<Uuid, DomainError> {
     let id = family.id();
@@ -35,24 +32,20 @@ impl DomainRepository for InMemoryDomainRepository {
     families.insert(id, family);
     Ok(id)
   }
-
   fn get_family(&self, id: &Uuid) -> Result<Option<MoleculeFamily>, DomainError> {
     let families = self.lock_map(&self.families, "families")?;
     Ok(families.get(id).cloned())
   }
-
   fn save_molecule(&self, molecule: Molecule) -> Result<String, DomainError> {
     let key = molecule.inchikey().to_string();
     let mut molecules = self.lock_map(&self.molecules, "molecules")?;
     molecules.insert(key.clone(), molecule);
     Ok(key)
   }
-
   fn get_molecule(&self, inchikey: &str) -> Result<Option<Molecule>, DomainError> {
     let molecules = self.lock_map(&self.molecules, "molecules")?;
     Ok(molecules.get(inchikey).cloned())
   }
-
   fn list_families(&self) -> Result<Vec<MoleculeFamily>, DomainError> {
     let families = self.lock_map(&self.families, "families")?;
     Ok(families.values().cloned().collect())
@@ -77,12 +70,10 @@ impl DomainRepository for InMemoryDomainRepository {
     let map = self.lock_map(&self.molecular_properties, "molecular_properties")?;
     Ok(map.values().filter(|p| p.molecule_inchikey == inchikey).cloned().collect())
   }
-
   fn list_molecules(&self) -> Result<Vec<Molecule>, DomainError> {
     let molecules = self.lock_map(&self.molecules, "molecules")?;
     Ok(molecules.values().cloned().collect())
   }
-
   fn delete_molecule(&self, inchikey: &str) -> Result<(), DomainError> {
     // Check families
     let families = self.lock_map(&self.families, "families")?;
@@ -97,7 +88,6 @@ impl DomainRepository for InMemoryDomainRepository {
     molecules.remove(inchikey);
     Ok(())
   }
-
   fn delete_family(&self, id: &Uuid) -> Result<(), DomainError> {
     let mut families = self.lock_map(&self.families, "families")?;
     families.remove(id);
@@ -106,14 +96,12 @@ impl DomainRepository for InMemoryDomainRepository {
     fps.retain(|_, v| &v.family_id != id);
     Ok(())
   }
-
   fn add_molecule_to_family(&self, family_id: &Uuid, molecule: Molecule) -> Result<Uuid, DomainError> {
     let fam_opt = self.get_family(family_id)?;
     let fam = fam_opt.ok_or(DomainError::ValidationError("Familia no encontrada".to_string()))?;
     let new_fam = fam.add_molecule(molecule)?;
     self.save_family(new_fam)
   }
-
   fn remove_molecule_from_family(&self, family_id: &Uuid, inchikey: &str) -> Result<Uuid, DomainError> {
     let fam_opt = self.get_family(family_id)?;
     let fam = fam_opt.ok_or(DomainError::ValidationError("Familia no encontrada".to_string()))?;
@@ -121,19 +109,16 @@ impl DomainRepository for InMemoryDomainRepository {
     self.save_family(new_fam)
   }
 }
-
 impl Default for InMemoryDomainRepository {
   fn default() -> Self {
     Self::new()
   }
 }
-
 impl DomainStubs {
   /// Crea un repositorio en memoria pre-populado con una familia y moléculas
   /// de ejemplo.
   pub fn sample_repo() -> InMemoryDomainRepository {
     let repo = InMemoryDomainRepository::new();
-
     // Crear dos moléculas simples usando from_parts para evitar dependencia RDKit
     let m1 = Molecule::from_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
                                   "CCO",
@@ -143,36 +128,28 @@ impl DomainStubs {
                                   "CCN",
                                   "InChI=1S/C2H7N/c1-2-3/h3H,2H2,1H3",
                                   json!({})).unwrap();
-
     let family = MoleculeFamily::new(vec![m1.clone(), m2.clone()], json!({"source": "stub"})).unwrap();
-
     let _ = repo.save_molecule(m1.clone());
     let _ = repo.save_molecule(m2.clone());
     // Guardar la familia y así poblar el mapa interno de familias
     let f_id = repo.save_family(family.clone()).unwrap();
-
     // Asegurarse de que el mapping familia->moléculas exista (en memoria
     // lo representamos con la familia misma). En el repo Diesel esto se
     // persistirá en la tabla `family_members`.
     let _ = f_id;
-
     // Ejemplos de operaciones que pueden fallar/ser probadas:
     // - repo.delete_molecule("some-inchikey") -> debe fallar si la molécula
     //   pertenece a una familia
     // - repo.delete_family(&f_id) -> elimina familia y propiedades
-
     repo
   }
 }
-
 #[cfg(test)]
 mod tests {
-  use serde_json::json;
-
   use crate::{
     DomainError, DomainRepository, InMemoryDomainRepository, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty,
   };
-
+  use serde_json::json;
   #[test]
   fn save_and_get_family() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -192,7 +169,6 @@ mod tests {
     assert_eq!(lf.len(), 2);
     Ok(())
   }
-
   #[test]
   fn save_and_get_molecule() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -206,7 +182,6 @@ mod tests {
     assert_eq!(loaded.unwrap().inchikey(), m.inchikey());
     Ok(())
   }
-
   #[test]
   fn save_and_get_properties() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -215,11 +190,9 @@ mod tests {
                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
                                         json!({}))?;
     let _m_key = repo.save_molecule(m.clone())?;
-
     // Crear familia
     let family = MoleculeFamily::new(vec![m.clone()], json!({"test": true}))?;
     let f_id = repo.save_family(family.clone())?;
-
     // Guardar propiedad molecular
     let mp = OwnedMolecularProperty { id: uuid::Uuid::new_v4(),
                                       molecule_inchikey: m.inchikey().to_string(),
@@ -232,7 +205,6 @@ mod tests {
     repo.save_molecular_property(mp.clone())?;
     let loaded_mp = repo.get_molecular_properties(m.inchikey())?;
     assert_eq!(loaded_mp.len(), 1);
-
     // Guardar propiedad de familia
     let fp = OwnedFamilyProperty { id: uuid::Uuid::new_v4(),
                                    family_id: f_id,
@@ -245,16 +217,12 @@ mod tests {
     repo.save_family_property(fp.clone())?;
     let loaded_fp = repo.get_family_properties(&f_id)?;
     assert_eq!(loaded_fp.len(), 1);
-
     Ok(())
   }
-
   #[test]
   fn mutex_poisoning_returns_error() {
     use std::thread;
-
     let repo = InMemoryDomainRepository::new();
-
     // Poison the families mutex by panicking while holding the lock in another
     // thread
     let fam_arc = repo.families.clone();
@@ -263,7 +231,6 @@ mod tests {
       panic!("force poison");
     });
     let _ = handle.join();
-
     // Now operations that try to acquire the lock should return
     // DomainError::ExternalError
     let res = repo.list_families();

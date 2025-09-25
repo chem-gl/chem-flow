@@ -8,7 +8,10 @@ use chem_persistence::{new_domain_from_env, new_flow_from_env};
 use chem_workflow::step::StepInfo;
 use chem_workflow::{
   factory::ChemicalWorkflowFactory,
-  flows::{cadma_flow::steps::step2::Step2Input, CadmaFlow},
+  flows::{
+    cadma_flow::steps::admetsa_properties_step2::{ADMETSAMethod, ADMETSAPropertiesStep2, Step2Input},
+    CadmaFlow,
+  },
   ChemicalFlowEngine,
 };
 use flow::repository::FlowRepository;
@@ -17,12 +20,10 @@ use std::error::Error;
 use std::io::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
-
 // Helper to get the flow name from the repository, or a default if not present
 fn get_flow_name(repo: &dyn FlowRepository, id: &Uuid) -> String {
   repo.get_flow_meta(id).ok().and_then(|meta| meta.name).unwrap_or_else(|| "sin nombre".to_string())
 }
-
 // ========== HELPERS ==========
 fn prompt(msg: &str) -> io::Result<String> {
   print!("{}", msg);
@@ -43,7 +44,6 @@ fn print_menu() {
   println!("8) Listar familias existentes con sus moléculas");
   println!("q) Salir");
 }
-
 fn select_flow_from_list(repo: &dyn FlowRepository, prompt_msg: &str) -> Result<Option<Uuid>, Box<dyn Error>> {
   let ids = repo.list_flow_ids()?;
   if ids.is_empty() {
@@ -96,10 +96,53 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
     return Ok(StepInfo { payload: serde_json::json!({"status": "already_executed", "step": step_name}),
                          metadata: serde_json::json!({}) });
   }
-
   let result = if step_name.to_lowercase() == "step2" {
-    let multiplier = prompt("Ingrese multiplicador (entero): ")?.trim().parse().unwrap_or(1);
-    let input = Step2Input { multiplier };
+    // Construir Step2Input preguntando los métodos preferidos al usuario
+    println!("Seleccione métodos preferidos en orden (separados por comas). Opciones:");
+    // Mostrar capacidades
+    let caps = ADMETSAPropertiesStep2::methods_capabilities();
+    for m in &[ADMETSAMethod::Manual,
+               ADMETSAMethod::Random1,
+               ADMETSAMethod::Random2,
+               ADMETSAMethod::Random3,
+               ADMETSAMethod::Random4]
+    {
+      let name = format!("{:?}", m);
+      let props =
+        caps.get(m).map(|v| v.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", ")).unwrap_or_default();
+      println!(" - {} -> {}", name, props);
+    }
+    let methods_raw =
+      prompt("Ingrese métodos separados por comas (ej: Random1,Random2) o enter para usar Random1,Random2: ")?;
+    let preferred_methods: Vec<ADMETSAMethod> = if methods_raw.trim().is_empty() {
+      vec![ADMETSAMethod::Random1, ADMETSAMethod::Random2]
+    } else {
+      methods_raw.split(',')
+                 .map(|s| s.trim())
+                 .filter(|s| !s.is_empty())
+                 .filter_map(|tok| match tok {
+                   "Manual" => Some(ADMETSAMethod::Manual),
+                   "Random1" => Some(ADMETSAMethod::Random1),
+                   "Random2" => Some(ADMETSAMethod::Random2),
+                   "Random3" => Some(ADMETSAMethod::Random3),
+                   "Random4" => Some(ADMETSAMethod::Random4),
+                   _ => {
+                     println!("Método desconocido: {} -> ignorado", tok);
+                     None
+                   }
+                 })
+                 .collect()
+    };
+
+    // Validar cobertura mínima
+    if let Err(e) = ADMETSAPropertiesStep2::validate_preferred_methods_cover(&preferred_methods) {
+      println!("⚠️  Métodos preferidos no cubren todas las propiedades requeridas: {}", e);
+      println!("Se aborta la ejecución del paso. Ajuste los métodos y vuelva a intentar.");
+      return Ok(StepInfo { payload: serde_json::json!({"status": "invalid_methods", "error": format!("{}", e)}),
+                           metadata: serde_json::json!({}) });
+    }
+
+    let input = Step2Input { preferred_methods, method_property_map: None, manual_values: None };
     engine.execute_current_step_typed(&input)?
   } else if step_name.to_lowercase().contains("family_reference_step1") || step_name.to_lowercase().contains("step1") {
     // Ofrecemos un pequeño sub-menú para cubrir todas las formas de usar el
@@ -118,7 +161,6 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
       // Prepara contenedores
       let mut families_opt: Option<Vec<Uuid>> = None;
       let mut mols_opt: Option<Vec<chem_domain::Molecule>> = None;
-
       if choice.trim() == "2" || choice.trim() == "3" {
         // Listar familias disponibles desde el domain_repo y permitir selección
         match engine.domain_repo.list_families() {
@@ -156,7 +198,6 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
           Err(e) => println!("Error listando familias: {}", e),
         }
       }
-
       if choice.trim() == "1" || choice.trim() == "3" {
         // Pedir SMILES y convertir a Molecule
         let smiles_raw = prompt("Ingrese SMILES separados por comas (enter para omitir): ")?;
@@ -173,7 +214,6 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
           }
         }
       }
-
       // Nombre y descripción opcionales.
       // Si el usuario seleccionó sólo una familia existente y no proporcionó
       // moléculas explícitas, no preguntamos la descripción por defecto
@@ -183,7 +223,6 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
       let new_desc: String;
       let single_existing_family = families_opt.as_ref().map(|v| v.len() == 1).unwrap_or(false);
       let has_explicit_mols = mols_opt.is_some();
-
       if single_existing_family && !has_explicit_mols {
         // Sólo pedir nombre (opcional). Si el usuario deja el nombre vacío
         // se usará la familia existente sin crear una nueva versión.
@@ -203,7 +242,6 @@ fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn 
         new_name = prompt("Nombre de la nueva familia (opcional): ")?;
         new_desc = prompt("Descripción de la nueva familia (opcional): ")?;
       }
-
       let input = json!({
         "families": families_opt,
         "molecules": mols_opt,
@@ -249,7 +287,6 @@ fn run_flow_interactive(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
           println!("✅ El flujo ya tenía resultado para este paso. Volviendo al menú.");
           continue;
         }
-
         if prompt("¿Persistir resultado? (y/N): ")?.to_lowercase().starts_with('y') {
           persist_step_result(engine, result)?;
         }
@@ -286,7 +323,6 @@ fn create_branch() -> Result<(), Box<dyn Error>> {
   if let Some(parent_id) = select_flow_from_list(&repo, "Selecciona flow padre:")? {
     let cursor_input = prompt("Cursor desde el que crear la rama: ")?;
     let parent_cursor: i64 = cursor_input.trim().parse()?;
-
     match repo.create_branch(&parent_id, parent_cursor, json!({})) {
       Ok(branch_id) => println!("🌿 Rama creada exitosamente: {}", branch_id),
       Err(e) => eprintln!("❌ Error creando rama: {}", e),
@@ -327,7 +363,6 @@ fn dump_all_flows() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 // ===== Domain helpers for families (outside flow) =====
 fn list_families_with_molecules() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
@@ -345,7 +380,6 @@ fn list_families_with_molecules() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn create_family_from_smiles_interactive() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
   let smiles_raw = prompt("Ingrese SMILES separados por comas: ")?;
