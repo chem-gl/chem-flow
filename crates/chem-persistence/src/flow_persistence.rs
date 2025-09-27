@@ -8,6 +8,8 @@ use flow::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
 use flow::errors::{FlowError, Result as FlowResult};
 use flow::repository::{ArtifactStore, FlowRepository, SnapshotStore};
 use serde_json::Value as JsonValue;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use uuid::Uuid;
 // Reusar el módulo `schema` definido en `lib.rs`.
@@ -22,8 +24,9 @@ type DbPool = Pool<ConnectionManager<PgConnection>>;
 type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 pub struct DieselFlowRepository {
   pool: Arc<DbPool>,
+  snapshot_dir: String,
+  artifact_dir: String,
 }
-impl DieselFlowRepository {}
 #[derive(Debug, Queryable, Insertable)]
 #[diesel(table_name = flows)]
 struct FlowRow {
@@ -65,7 +68,11 @@ impl DieselFlowRepository {
   pub fn new(database_url: &str) -> Self {
     let manager = ConnectionManager::<SqliteConnection>::new(database_url);
     let pool = Pool::builder().max_size(1).build(manager).expect("no se pudo crear el pool de conexiones");
-    let repo = DieselFlowRepository { pool: Arc::new(pool) };
+    let snapshot_dir = std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string());
+    let artifact_dir = std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string());
+    fs::create_dir_all(&snapshot_dir).ok();
+    fs::create_dir_all(&artifact_dir).ok();
+    let repo = DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir };
     if let Ok(mut c) = repo.conn_raw() {
       let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut c);
       let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut c);
@@ -131,7 +138,11 @@ impl DieselFlowRepository {
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = Pool::builder().build(manager)
                               .map_err(|e| FlowError::Storage(format!("no se pudo crear el pool de conexiones: {}", e)))?;
-    let repo = DieselFlowRepository { pool: Arc::new(pool) };
+    let snapshot_dir = std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string());
+    let artifact_dir = std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string());
+    fs::create_dir_all(&snapshot_dir).ok();
+    fs::create_dir_all(&artifact_dir).ok();
+    let repo = DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir };
     if let Ok(mut c) = repo.conn_raw() {
       match c.run_pending_migrations(MIGRATIONS) {
         Ok(applied) => eprintln!("chem-persistence (pg): aplicadas {} migraciones embebidas", applied.len()),
@@ -293,7 +304,7 @@ impl FlowRepository for DieselFlowRepository {
     let sid = snapshot_id.to_string();
     let r =
       snapshots.filter(id.eq(&sid)).first::<SnapshotRow>(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-    let bytes = r.state_ptr.clone().into_bytes();
+    let bytes = self.load(&r.state_ptr)?;
     let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
                               flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
                               cursor: r.cursor,
@@ -524,8 +535,10 @@ impl FlowRepository for DieselFlowRepository {
     // Behavior:
     // - keep steps with cursor < from_cursor
     // - delete steps with cursor >= from_cursor for the given flow
+    // - delete snapshots with cursor >= from_cursor for the given flow
     // - find child branches whose parent_cursor >= from_cursor and delete them
     //   recursively
+    // - update current_cursor to max remaining cursor or 0
     let mut conn = self.conn()?;
     let fid = _flow_id.to_string();
     // Ensure flow exists
@@ -536,8 +549,21 @@ impl FlowRepository for DieselFlowRepository {
     if exists.is_none() {
       return Err(FlowError::NotFound(format!("flow {}", _flow_id)));
     }
-    // Delete flow_data with cursor >= from_cursor
-    map_db_err(diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(_from_cursor)))).execute(&mut conn))?;
+    conn.transaction::<(), diesel::result::Error, _>(|conn| {
+      // Delete flow_data with cursor >= from_cursor
+      diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(_from_cursor)))).execute(conn)?;
+      // Delete snapshots with cursor >= from_cursor
+      diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid).and(schema::snapshots::dsl::cursor.ge(_from_cursor)))).execute(conn)?;
+      // Update current_cursor to max remaining cursor or 0
+      let new_cursor_opt: Option<i64> = data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))
+        .select(diesel::dsl::max(data_dsl::cursor))
+        .first(conn)?;
+      let new_cursor = new_cursor_opt.unwrap_or(0);
+      diesel::update(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)))
+        .set(flows_dsl::current_cursor.eq(new_cursor))
+        .execute(conn)?;
+      Ok(())
+    }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))?;
     // Find child flows whose parent_cursor >= from_cursor and collect their ids
     let child_rows: Vec<FlowRow> =
       map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
@@ -560,21 +586,33 @@ impl FlowRepository for DieselFlowRepository {
   }
 }
 impl SnapshotStore for DieselFlowRepository {
-  fn save(&self, _state: &[u8]) -> FlowResult<String> {
-    Err(FlowError::Other("not implemented".into()))
+  fn save(&self, state: &[u8]) -> FlowResult<String> {
+    let key = format!("{}.bin", Uuid::new_v4());
+    let path = Path::new(&self.snapshot_dir).join(&key);
+    fs::write(&path, state).map_err(|e| FlowError::Storage(e.to_string()))?;
+    Ok(key)
   }
-  fn load(&self, _key: &str) -> FlowResult<Vec<u8>> {
-    Err(FlowError::Other("not implemented".into()))
+  fn load(&self, key: &str) -> FlowResult<Vec<u8>> {
+    let path = Path::new(&self.snapshot_dir).join(key);
+    fs::read(&path).map_err(|e| FlowError::Storage(e.to_string()))
   }
 }
 impl ArtifactStore for DieselFlowRepository {
-  fn put(&self, _blob: &[u8]) -> FlowResult<String> {
-    Err(FlowError::Other("not implemented".into()))
+  fn put(&self, blob: &[u8]) -> FlowResult<String> {
+    let key = format!("{}.bin", Uuid::new_v4());
+    let path = Path::new(&self.artifact_dir).join(&key);
+    fs::write(&path, blob).map_err(|e| FlowError::Storage(e.to_string()))?;
+    Ok(key)
   }
-  fn get(&self, _key: &str) -> FlowResult<Vec<u8>> {
-    Err(FlowError::Other("not implemented".into()))
+  fn get(&self, key: &str) -> FlowResult<Vec<u8>> {
+    let path = Path::new(&self.artifact_dir).join(key);
+    fs::read(&path).map_err(|e| FlowError::Storage(e.to_string()))
   }
-  fn copy_if_needed(&self, _src_key: &str) -> FlowResult<String> {
-    Err(FlowError::Other("not implemented".into()))
+  fn copy_if_needed(&self, src_key: &str) -> FlowResult<String> {
+    let new_key = format!("{}.bin", Uuid::new_v4());
+    let src_path = Path::new(&self.artifact_dir).join(src_key);
+    let dest_path = Path::new(&self.artifact_dir).join(&new_key);
+    fs::copy(&src_path, &dest_path).map_err(|e| FlowError::Storage(e.to_string()))?;
+    Ok(new_key)
   }
 }

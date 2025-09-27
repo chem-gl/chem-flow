@@ -1,3 +1,4 @@
+//errors.rs
 // Archivo: errors.rs
 // Propósito: definir los errores del dominio y el alias Result<T> usado por
 // las APIs del crate. Los comentarios y variantes están en español.

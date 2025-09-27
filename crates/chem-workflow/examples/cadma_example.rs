@@ -1,461 +1,649 @@
-// cadma_example.rs
-//
-// Ejemplo interactivo que muestra la creación, ejecución y
-// persistencia de un `CadmaFlow` usando los repositorios de
-// persistencia del workspace (chem-persistence).
-use chem_domain::DomainRepository;
+// cadma_demo.rs
+//! Demo interactivo mejorado para CadmaFlow.
+//! - Crea / carga flows
+//! - Ejecuta pasos interactivos (Step1, Step2)
+//! - Persiste resultados, guarda snapshots y maneja ramas
+//! - Listar / inspeccionar datos persistidos
+use chem_domain::{DomainRepository, Molecule, MoleculeFamily};
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
-use chem_workflow::step::StepInfo;
-use chem_workflow::{
-  factory::ChemicalWorkflowFactory,
-  flows::{
-    cadma_flow::steps::admetsa_properties_step2::{ADMETSAMethod, ADMETSAPropertiesStep2, Step2Input},
-    CadmaFlow,
-  },
-  ChemicalFlowEngine,
+use chem_workflow::flows::cadma_flow::steps::{
+  admetsa_properties_step2::{ADMETSAMethod, ManualValues, PropertyValues, Step2Input, ALL_METHODS, REQUIRED_PROPERTIES},
+  family_reference_step1::{Step1Input, Step1Payload},
+  molecule_initial_step3::{GenerationMethod, Step3Input},
 };
+use chem_workflow::{factory::ChemicalWorkflowFactory, flows::cadma_flow::CadmaFlow, ChemicalFlowEngine};
 use flow::repository::FlowRepository;
 use serde_json::json;
 use std::error::Error;
 use std::io::{self, Write};
 use std::sync::Arc;
 use uuid::Uuid;
-// Helper to get the flow name from the repository, or a default if not present
-fn get_flow_name(repo: &dyn FlowRepository, id: &Uuid) -> String {
-  repo.get_flow_meta(id).ok().and_then(|meta| meta.name).unwrap_or_else(|| "sin nombre".to_string())
-}
-// ========== HELPERS ==========
-fn prompt(msg: &str) -> io::Result<String> {
+
+fn prompt(msg: &str) -> Result<String, Box<dyn Error>> {
   print!("{}", msg);
   io::stdout().flush()?;
   let mut s = String::new();
   io::stdin().read_line(&mut s)?;
   Ok(s.trim_end().to_string())
 }
-fn print_menu() {
-  println!("\n== CadmaFlow Demo (Base de Datos) ==");
-  println!("1) Crear nuevo flow");
-  println!("2) Listar flujos existentes");
-  println!("3) Ejecutar flujo interactivo");
-  println!("4) Crear rama desde flow existente");
-  println!("5) Ver pasos de un flow");
-  println!("6) Dump completo de todos los flujos");
-  println!("7) Crear familia desde SMILES (dominio)");
-  println!("8) Listar familias existentes con sus moléculas");
-  println!("q) Salir");
+
+fn parse_manual_values(input: &str) -> Result<PropertyValues, String> {
+  let mut map = PropertyValues::new();
+  for part in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    let kv: Vec<&str> = part.split('=').map(|s| s.trim()).collect();
+    if kv.len() != 2 {
+      return Err(format!("Formato inválido en '{}'", part));
+    }
+    let key = kv[0].to_string();
+    let val: f64 = kv[1].parse().map_err(|_| format!("Valor no numérico en '{}'", part))?;
+    map.insert(key, val);
+  }
+  Ok(map)
 }
-fn select_flow_from_list(repo: &dyn FlowRepository, prompt_msg: &str) -> Result<Option<Uuid>, Box<dyn Error>> {
+
+fn get_flow_name(repo: &dyn FlowRepository, id: &Uuid) -> String {
+  repo.get_flow_meta(id).ok().and_then(|m| m.name).unwrap_or_else(|| "sin nombre".to_string())
+}
+
+// Selección simple de flow desde el repo
+fn select_flow_from_repo(repo: &dyn FlowRepository) -> Result<Option<Uuid>, Box<dyn Error>> {
   let ids = repo.list_flow_ids()?;
   if ids.is_empty() {
-    println!("No hay flujos disponibles");
+    println!("No hay flujos disponibles.");
     return Ok(None);
   }
-  println!("{}", prompt_msg);
   for (i, id) in ids.iter().enumerate() {
-    let name = get_flow_name(repo, id);
-    println!("[{}] {} - {}", i, id, name);
+    println!("  [{}] {} - {}", i, id, get_flow_name(repo, id));
   }
-  let input = prompt("Selecciona un índice: ")?;
-  let idx: usize = input.trim().parse().map_err(|_| "Índice inválido")?;
+  let s = prompt("Selecciona índice (enter para cancelar): ")?;
+  if s.trim().is_empty() {
+    return Ok(None);
+  }
+  let idx: usize = s.trim().parse()?;
   if idx >= ids.len() {
-    println!("Índice fuera de rango");
+    println!("Índice fuera de rango.");
     return Ok(None);
   }
   Ok(Some(ids[idx]))
 }
-// ========== FLOW OPERATIONS ==========
-fn create_flow() -> Result<(), Box<dyn Error>> {
-  let name = prompt("Nombre del flow (enter para nombre por defecto): ")?;
-  let flow_name = if name.is_empty() { "cadma-flow".to_string() } else { name };
-  match ChemicalWorkflowFactory::create::<CadmaFlow>(flow_name) {
-    Ok(engine_box) => println!("✅ Flow creado exitosamente: {}", (*engine_box).id()),
-    Err(e) => eprintln!("❌ Error creando flow: {}", e),
-  }
-  Ok(())
-}
-fn list_flows() -> Result<(), Box<dyn Error>> {
-  let repo = new_flow_from_env()?;
-  let ids = repo.list_flow_ids()?;
-  println!("\n📋 Flujos encontrados ({}):", ids.len());
-  for id in ids {
-    let name = get_flow_name(&repo, &id);
-    println!("  • {} - {}", id, name);
-  }
-  Ok(())
-}
-fn execute_step_interactive(engine: &mut CadmaFlow) -> Result<StepInfo, Box<dyn Error>> {
-  let step_name = engine.current_step_name()?;
-  println!("▶️  Ejecutando paso: {}", step_name);
-  // Antes de ejecutar, comprobar si ya existe payload para el paso.
-  // En lugar de devolver un error fatal, informamos y devolvemos un
-  // StepInfo especial para que la UI pueda regresar al menú de forma
-  // amigable.
-  if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
-    println!("ℹ️  El paso '{}' ya fue ejecutado para este flow; no hay acciones pendientes.",
-             step_name);
-    return Ok(StepInfo { payload: serde_json::json!({"status": "already_executed", "step": step_name}),
-                         metadata: serde_json::json!({}) });
-  }
-  let result = if step_name.to_lowercase() == "step2" {
-    // Construir Step2Input preguntando los métodos preferidos al usuario
-    println!("Seleccione métodos preferidos en orden (separados por comas). Opciones:");
-    // Mostrar capacidades
-    let caps = ADMETSAPropertiesStep2::methods_capabilities();
-    for m in &[ADMETSAMethod::Manual,
-               ADMETSAMethod::Random1,
-               ADMETSAMethod::Random2,
-               ADMETSAMethod::Random3,
-               ADMETSAMethod::Random4]
-    {
-      let name = format!("{:?}", m);
-      let props =
-        caps.get(m).map(|v| v.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", ")).unwrap_or_default();
-      println!(" - {} -> {}", name, props);
-    }
-    let methods_raw =
-      prompt("Ingrese métodos separados por comas (ej: Random1,Random2) o enter para usar Random1,Random2: ")?;
-    let preferred_methods: Vec<ADMETSAMethod> = if methods_raw.trim().is_empty() {
-      vec![ADMETSAMethod::Random1, ADMETSAMethod::Random2]
-    } else {
-      methods_raw.split(',')
-                 .map(|s| s.trim())
-                 .filter(|s| !s.is_empty())
-                 .filter_map(|tok| match tok {
-                   "Manual" => Some(ADMETSAMethod::Manual),
-                   "Random1" => Some(ADMETSAMethod::Random1),
-                   "Random2" => Some(ADMETSAMethod::Random2),
-                   "Random3" => Some(ADMETSAMethod::Random3),
-                   "Random4" => Some(ADMETSAMethod::Random4),
-                   _ => {
-                     println!("Método desconocido: {} -> ignorado", tok);
-                     None
-                   }
-                 })
-                 .collect()
-    };
 
-    // Validar cobertura mínima
-    if let Err(e) = ADMETSAPropertiesStep2::validate_preferred_methods_cover(&preferred_methods) {
-      println!("⚠️  Métodos preferidos no cubren todas las propiedades requeridas: {}", e);
-      println!("Se aborta la ejecución del paso. Ajuste los métodos y vuelva a intentar.");
-      return Ok(StepInfo { payload: serde_json::json!({"status": "invalid_methods", "error": format!("{}", e)}),
-                           metadata: serde_json::json!({}) });
-    }
+/// Crea un flow nuevo (persistido por factory) y devuelve la instancia cargada.
+fn create_flow_interactive() -> Result<CadmaFlow, Box<dyn Error>> {
+  let name = prompt("Nombre del flow (enter = cadma-demo): ")?;
+  let flow_name = if name.trim().is_empty() { "cadma-demo".to_string() } else { name };
+  // ChemicalWorkflowFactory::create<T> crea y persiste el flow en la repo
+  let engine_box = ChemicalWorkflowFactory::create::<CadmaFlow>(flow_name)?;
+  println!("Flow creado: {}", engine_box.id());
+  // Unbox para devolver la instancia concreta
+  Ok(*engine_box)
+}
 
-    let input = Step2Input { preferred_methods, method_property_map: None, manual_values: None };
-    engine.execute_current_step_typed(&input)?
-  } else if step_name.to_lowercase().contains("family_reference_step1") || step_name.to_lowercase().contains("step1") {
-    // Ofrecemos un pequeño sub-menú para cubrir todas las formas de usar el
-    // Step1: 1) ingresar SMILES, 2) seleccionar familias existentes, 3)
-    // combinar ambas. También listamos moléculas disponibles en el repo.
-    println!("\n--- Opciones para Step1 (Family Reference) ---");
-    println!("1) Ingresar SMILES separados por comas");
-    println!("2) Seleccionar una o más familias existentes en el repositorio");
-    println!("3) Combinar SMILES + seleccionar familias");
-    println!("4) Cancelar");
-    let choice = prompt("Selecciona una opción: ")?;
-    if choice.trim() == "4" {
-      println!("Operación cancelada");
-      engine.execute_current_step(&json!({}))?
-    } else {
-      // Prepara contenedores
-      let mut families_opt: Option<Vec<Uuid>> = None;
-      let mut mols_opt: Option<Vec<chem_domain::Molecule>> = None;
-      if choice.trim() == "2" || choice.trim() == "3" {
-        // Listar familias disponibles desde el domain_repo y permitir selección
-        match engine.domain_repo.list_families() {
-          Ok(listed) => {
-            if listed.is_empty() {
-              println!("No hay familias en el repositorio");
-            } else {
-              println!("Familias disponibles:");
-              for (i, f) in listed.iter().enumerate() {
-                // Build a short comma-separated list of InChIKeys for display
-                let mols_list = f.molecules().iter().map(|m| m.inchikey().to_string()).collect::<Vec<_>>().join(", ");
-                let name = f.name().map(|s| s.as_str()).unwrap_or("sin nombre");
-                println!("  [{}] {} - {} ({})", i, f.id(), name, mols_list);
-              }
-              let sel = prompt("Indices de familias separados por comas (enter para omitir): ")?;
-              if !sel.trim().is_empty() {
-                let mut sel_ids = Vec::new();
-                for s in sel.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-                  if let Ok(idx) = s.parse::<usize>() {
-                    if idx < listed.len() {
-                      sel_ids.push(listed[idx].id());
-                    } else {
-                      println!("Índice fuera de rango: {}", idx);
-                    }
-                  } else {
-                    println!("Índice inválido ignorado: {}", s);
-                  }
-                }
-                if !sel_ids.is_empty() {
-                  families_opt = Some(sel_ids);
-                }
-              }
-            }
-          }
-          Err(e) => println!("Error listando familias: {}", e),
-        }
+/// Muestra metadatos y flow_meta básicos
+fn show_metadata(engine: &CadmaFlow) {
+  match engine.get_metadata("flow_metadata") {
+    Ok(meta) => println!("flow_metadata: {}", serde_json::to_string_pretty(&meta).unwrap_or_default()),
+    Err(e) => println!("No hay metadata (error: {})", e),
+  }
+  println!("ID: {}, current_step: {}, status: {:?}",
+           engine.id(),
+           engine.current_step(),
+           engine.status());
+}
+
+/// Ejecuta interactivamente Step1 (FamilyReferenceStep1)
+fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  println!("\n== Step1: Familias ==");
+  // Mostrar familias existentes en domain repo
+  let domain = engine.domain_repo();
+  let families = domain.list_families().unwrap_or_default();
+
+  // Caso 1: no hay familias -> crear nueva con SMILES
+  if families.is_empty() {
+    println!("No existen familias en el dominio. Crear nueva familia con SMILES.");
+    let smiles = prompt("SMILES (separados por coma): ")?;
+    let mut mols = Vec::new();
+    for s in smiles.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+      match Molecule::from_smiles(s) {
+        Ok(m) => mols.push(m),
+        Err(e) => println!("SMILES inválido '{}': {}", s, e),
       }
-      if choice.trim() == "1" || choice.trim() == "3" {
-        // Pedir SMILES y convertir a Molecule
-        let smiles_raw = prompt("Ingrese SMILES separados por comas (enter para omitir): ")?;
-        if !smiles_raw.trim().is_empty() {
-          let mut mv = Vec::new();
-          for s in smiles_raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-            match chem_domain::Molecule::from_smiles(s) {
-              Ok(m) => mv.push(m),
-              Err(e) => println!("Error creando molécula para SMILES '{}': {}", s, e),
-            }
-          }
-          if !mv.is_empty() {
-            mols_opt = Some(mv);
-          }
-        }
-      }
-      // Nombre y descripción opcionales.
-      // Si el usuario seleccionó sólo una familia existente y no proporcionó
-      // moléculas explícitas, no preguntamos la descripción por defecto
-      // (usaremos la descripción de la familia seleccionada salvo que el
-      // usuario decida cambiarla al introducir un nuevo nombre).
-      let new_name: String;
-      let new_desc: String;
-      let single_existing_family = families_opt.as_ref().map(|v| v.len() == 1).unwrap_or(false);
-      let has_explicit_mols = mols_opt.is_some();
-      if single_existing_family && !has_explicit_mols {
-        // Sólo pedir nombre (opcional). Si el usuario deja el nombre vacío
-        // se usará la familia existente sin crear una nueva versión.
-        let tmp_name = prompt("Nombre de la nueva familia (opcional, enter para usar la existente): ")?;
-        if !tmp_name.trim().is_empty() {
-          // Si se provee un nuevo nombre, preguntar descripción opcional
-          let tmp_desc = prompt("Descripción de la nueva familia (opcional): ")?;
-          new_name = tmp_name;
-          new_desc = tmp_desc;
+    }
+    if mols.is_empty() {
+      println!("No se crearon moléculas. Abortando Step1.");
+      return Ok(());
+    }
+    let name = prompt("Nombre de la nueva familia (opcional): ")?;
+    let input = Step1Input { families: None,
+                             molecules: Some(mols),
+                             new_family_name: if name.trim().is_empty() { None } else { Some(name) },
+                             new_family_description: None };
+    // Forzamos temporalmente el current_step a 0 para permitir la ejecución
+    // manual del Step1 en el demo aun cuando el flow cargado tenga
+    // `current_step` avanzado. Esto evita que la validación de pasos
+    // previos impida la ejecución interactiva del primer paso.
+    let json_input = serde_json::to_value(&input)?;
+    let info = engine.execute_step_by_index_unchecked(0, &json_input)?;
+    let step_name = engine.current_step_name()?;
+    engine.persist_step_result(&step_name, info, -1, None)?;
+    println!("Step1 ejecutado y persistido.");
+    return Ok(());
+  }
+
+  // Si hay familias, preguntar si crear nueva o seleccionar existente
+  println!("Familias encontradas:");
+  for (i, f) in families.iter().enumerate() {
+    let name = f.name().map(|s| s.to_string()).unwrap_or_else(|| "sin nombre".to_string());
+    println!("  {}: {} ({} moléculas) - id={}", i + 1, name, f.molecules().len(), f.id());
+  }
+  println!("0) Crear nueva familia");
+  let choice = prompt("Elige número (0=create): ")?;
+  if choice.trim() == "0" {
+    let name = prompt("Nombre de la nueva familia: ")?;
+    // Pedimos SMILES para poblarla opcionalmente
+    let smiles = prompt("SMILES (opcional, coma separados): ")?;
+    let mut mols_opt = None;
+    if !smiles.trim().is_empty() {
+      let mut mols = Vec::new();
+      for s in smiles.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Ok(m) = Molecule::from_smiles(s) {
+          mols.push(m);
         } else {
-          new_name = tmp_name;
-          new_desc = String::new();
+          println!("SMILES inválido (ignorado): {}", s);
         }
-      } else {
-        // En otros casos (múltiples familias seleccionadas o moléculas explícitas)
-        // pedir nombre y descripción como antes.
-        new_name = prompt("Nombre de la nueva familia (opcional): ")?;
-        new_desc = prompt("Descripción de la nueva familia (opcional): ")?;
       }
-      let input = json!({
-        "families": families_opt,
-        "molecules": mols_opt,
-        "new_family_name": if new_name.trim().is_empty() { serde_json::Value::Null } else { serde_json::json!(new_name) },
-        "new_family_description": if new_desc.trim().is_empty() { serde_json::Value::Null } else { serde_json::json!(new_desc) },
-      });
-      engine.execute_current_step(&input)?
+      if !mols.is_empty() {
+        mols_opt = Some(mols);
+      }
     }
+    let input = Step1Input { families: None,
+                             molecules: mols_opt,
+                             new_family_name: if name.trim().is_empty() { None } else { Some(name) },
+                             new_family_description: None };
+    // Forzamos current_step a 0 por la misma razón explicada arriba.
+    let json_input = serde_json::to_value(&input)?;
+    let info = engine.execute_step_by_index_unchecked(0, &json_input)?;
+    let step_name = "FamilyReferenceStep1".to_string();
+    engine.persist_step_result(&step_name, info, -1, None)?;
+    println!("Nueva familia creada y Step1 persistido.");
+    return Ok(());
+  }
+
+  // seleccionar existente
+  if let Ok(n) = choice.trim().parse::<usize>() {
+    if n >= 1 && n <= families.len() {
+      let fid = families[n - 1].id();
+      let input =
+        Step1Input { families: Some(vec![fid]), molecules: None, new_family_name: None, new_family_description: None };
+      // Evitar doble ejecución si ya existe payload
+      let step_name = engine.current_step_name()?;
+      if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
+        println!("El paso ya fue ejecutado para este flow; omitiendo.");
+        return Ok(());
+      }
+      // Forzamos current_step=0 para permitir la ejecución interactiva del
+      // Step1 y evitar el error por pasos previos faltantes.
+      let json_input = serde_json::to_value(&input)?;
+      let info = engine.execute_step_by_index_unchecked(0, &json_input)?;
+      engine.persist_step_result(&step_name, info, -1, None)?;
+      println!("Familia seleccionada y Step1 persistido.");
+      return Ok(());
+    } else {
+      println!("Índice inválido.");
+    }
+  }
+  Ok(())
+}
+
+/// Ejecuta interactivamente Step2 (ADMETSA)
+fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  println!("\n== Step2: ADMETSA ==");
+  // Mostrar capacidades por método para ayudar la selección (recreamos
+  // localmente)
+  println!("Métodos disponibles (y propiedades que generan):");
+  for &m in &ALL_METHODS {
+    let props: Vec<String> =
+      REQUIRED_PROPERTIES.iter().filter_map(|&p| if m.can_generate(p) { Some(format!("{:?}", p)) } else { None }).collect();
+    println!(" - {:?} -> {}", m, props.join(", "));
+  }
+
+  // Pedimos orden preferente por nombre (coma separado) — la interfaz es
+  // tolerante
+  let raw = prompt("Métodos preferidos (coma separados, e.g. Random1,Random2) [enter = Random1,Random2]: ")?;
+  let preferred: Vec<ADMETSAMethod> = if raw.trim().is_empty() {
+    vec![ADMETSAMethod::Random1, ADMETSAMethod::Random2]
   } else {
-    engine.execute_current_step(&json!({}))?
+    raw.split(',')
+       .map(|s| s.trim())
+       .filter_map(|tok| match tok {
+         "Manual" => Some(ADMETSAMethod::Manual),
+         "Random1" => Some(ADMETSAMethod::Random1),
+         "Random2" => Some(ADMETSAMethod::Random2),
+         "Random3" => Some(ADMETSAMethod::Random3),
+         "Random4" => Some(ADMETSAMethod::Random4),
+         other => {
+           println!("Método desconocido: {} (ignorando)", other);
+           None
+         }
+       })
+       .collect()
   };
-  println!("📊 Resultado: {}", result.payload);
-  Ok(result)
-}
-fn persist_step_result(engine: &CadmaFlow, info: StepInfo) -> Result<(), Box<dyn Error>> {
-  let cmd_id_input = prompt("Command ID (UUID opcional, enter para omitir): ")?;
-  let command_id = if cmd_id_input.trim().is_empty() { None } else { Some(Uuid::parse_str(&cmd_id_input)?) };
-  match engine.persist_step_result(&engine.current_step_name()?, info, -1, command_id) {
-    Ok(res) => println!("💾 Persistido: {:?}", res),
-    Err(e) => eprintln!("❌ Error al persistir: {}", e),
-  }
-  Ok(())
-}
-fn run_flow_interactive(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
-  println!("\n🔧 Flow seleccionado: {}", engine.id());
-  println!("   Paso actual: {}, Estado: {:?}", engine.current_step(), engine.status());
-  loop {
-    if engine.current_step_name().is_err() {
-      println!("🎉 El flujo ha finalizado");
-      break;
-    }
-    println!("\nOpciones:");
-    println!("  r) Ejecutar siguiente paso");
-    println!("  s) Mostrar último payload");
-    println!("  b) Volver al menú principal");
-    match prompt("Selecciona una opción: ")?.trim() {
-      "r" => {
-        let result = execute_step_interactive(engine)?;
-        // Si el resultado indica que el paso ya fue ejecutado, no
-        // preguntar por persistir ni avanzar: solo volver al menú.
-        let already = result.payload.get("status").and_then(|v| v.as_str()) == Some("already_executed");
-        if already {
-          println!("✅ El flujo ya tenía resultado para este paso. Volviendo al menú.");
-          continue;
-        }
-        if prompt("¿Persistir resultado? (y/N): ")?.to_lowercase().starts_with('y') {
-          persist_step_result(engine, result)?;
-        }
-        if prompt("¿Avanzar al siguiente paso? (y/N): ")?.to_lowercase().starts_with('y') {
-          let _ = engine.advance_step();
-          println!("➡️  Avanzado al paso {}", engine.current_step());
-        }
-      }
-      "s" => {
-        let name = engine.current_step_name()?;
-        match engine.get_last_step_payload(&name) {
-          Ok(Some(payload)) => println!("📄 Último payload: {}", payload),
-          Ok(None) => println!("ℹ️  No hay payload para {}", name),
-          Err(e) => eprintln!("❌ Error leyendo payload: {}", e),
-        }
-      }
-      "b" => break,
-      other => println!("❌ Opción desconocida: {}", other),
+
+  // Validación local rápida: preferred cover?
+  for &prop in &REQUIRED_PROPERTIES {
+    let ok = preferred.iter().any(|&m| m.can_generate(prop));
+    if !ok {
+      println!("Los métodos preferidos no cubren la propiedad requerida: {:?}", prop);
+      println!("Ajusta los métodos y vuelve a intentar.");
+      return Ok(());
     }
   }
-  Ok(())
-}
-fn select_and_run_flow() -> Result<(), Box<dyn Error>> {
-  let repo = new_flow_from_env()?;
-  if let Some(flow_id) = select_flow_from_list(&repo, "Selecciona un flow para ejecutar:")? {
-    let mut engine =
-      ChemicalWorkflowFactory::load::<CadmaFlow>(&flow_id).map_err(|e| format!("Error cargando engine: {}", e))?;
-    run_flow_interactive(&mut engine)?;
-  }
-  Ok(())
-}
-fn create_branch() -> Result<(), Box<dyn Error>> {
-  let repo = new_flow_from_env()?;
-  if let Some(parent_id) = select_flow_from_list(&repo, "Selecciona flow padre:")? {
-    let cursor_input = prompt("Cursor desde el que crear la rama: ")?;
-    let parent_cursor: i64 = cursor_input.trim().parse()?;
-    match repo.create_branch(&parent_id, parent_cursor, json!({})) {
-      Ok(branch_id) => println!("🌿 Rama creada exitosamente: {}", branch_id),
-      Err(e) => eprintln!("❌ Error creando rama: {}", e),
-    }
-  }
-  Ok(())
-}
-fn view_flow_steps() -> Result<(), Box<dyn Error>> {
-  let repo = new_flow_from_env()?;
-  if let Some(flow_id) = select_flow_from_list(&repo, "Selecciona flow para ver pasos:")? {
-    let meta = repo.get_flow_meta(&flow_id)?;
-    let steps = repo.read_data(&flow_id, 0)?;
-    println!("\n📊 Flow: {} (Cursor: {}, Versión: {})",
-             meta.name.unwrap_or_else(|| "sin nombre".to_string()),
-             meta.current_cursor,
-             meta.current_version);
-    println!("┌{:─<20}┬{:─<30}┬{:─<50}┐", "", "", "");
-    println!("│ {:<18} │ {:<28} │ {:<48} │", "Cursor", "Key", "Payload");
-    println!("├{:─<20}┼{:─<30}┼{:─<50}┤", "", "", "");
-    for step in steps {
-      println!("│ {:<18} │ {:<28} │ {:<48} │", step.cursor, step.key, step.payload);
-    }
-    println!("└{:─<20}┴{:─<30}┴{:─<50}┘", "", "", "");
-  }
-  Ok(())
-}
-fn dump_all_flows() -> Result<(), Box<dyn Error>> {
-  let repo = new_flow_from_env()?;
-  let (metas, datas) = repo.dump_tables_for_debug()?;
-  println!("\n📋 DUMP COMPLETO - {} flujos, {} registros", metas.len(), datas.len());
-  for meta in metas {
-    println!("\n🔧 Flow: {} (Cursor: {}, Versión: {})",
-             meta.id, meta.current_cursor, meta.current_version);
-    let flow_data: Vec<_> = datas.iter().filter(|d| d.flow_id == meta.id).collect();
-    for data in flow_data {
-      println!("   ├─ {} | {} | {}", data.cursor, data.key, data.payload);
-    }
-  }
-  Ok(())
-}
-// ===== Domain helpers for families (outside flow) =====
-fn list_families_with_molecules() -> Result<(), Box<dyn Error>> {
-  let repo = new_domain_from_env()?;
-  match repo.list_families() {
-    Ok(fams) => {
-      println!("\n📋 Familias encontradas: {}", fams.len());
-      for f in fams {
-        println!("- Family id={} name={:?} size={}", f.id(), f.name(), f.len());
-        for m in f.molecules() {
-          println!("    - InChIKey={} SMILES={}", m.inchikey(), m.smiles());
-        }
-      }
-    }
-    Err(e) => println!("Error listando familias: {}", e),
-  }
-  Ok(())
-}
-fn create_family_from_smiles_interactive() -> Result<(), Box<dyn Error>> {
-  let repo = new_domain_from_env()?;
-  let smiles_raw = prompt("Ingrese SMILES separados por comas: ")?;
-  if smiles_raw.trim().is_empty() {
-    println!("No se ingresaron SMILES");
+
+  // evitar ejecutar si Step1 no existe
+  // Comprobar que Step1 ya fue ejecutado: leemos el último payload para el
+  // primer paso y lo deserializamos.
+  let step_name_0 = engine.step_name_by_index(0)?;
+  let step1_payload = match engine.get_last_step_payload(&step_name_0)? {
+    Some(v) => Some(serde_json::from_value::<Step1Payload>(v)?),
+    None => None,
+  };
+  if step1_payload.is_none() {
+    println!("No se encontró resultado de Step1: ejecuta Step1 primero.");
     return Ok(());
   }
-  let mut mols = Vec::new();
-  for s in smiles_raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-    match chem_domain::Molecule::from_smiles(s) {
-      Ok(m) => mols.push(m),
-      Err(e) => println!("Error creando molécula para SMILES '{}': {}", s, e),
+
+  // Si Manual está incluido, pedir valores manuales
+  let mut manual_values: Option<ManualValues> = None;
+  if preferred.contains(&ADMETSAMethod::Manual) {
+    // Obtener familia y moléculas
+    let family = engine.domain_repo
+                      .get_family(&step1_payload.as_ref().unwrap().family_uuid)?
+                      .ok_or_else(|| "Familia no encontrada".to_string())?;
+    let molecules: Vec<&Molecule> = family.molecules().iter().collect();
+    let mut mv = ManualValues::new();
+    println!("Ingresando valores manuales para {} moléculas.", molecules.len());
+    println!("Propiedades requeridas: {:?}", REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", "));
+    for mol in &molecules {
+      let smiles = mol.smiles();
+      loop {
+        let input = prompt(&format!("Valores para {} (formato: Prop=val,Prop=val,...): ", smiles))?;
+        let parsed = parse_manual_values(&input);
+        if let Ok(props) = parsed {
+          // Verificar que todas las requeridas estén
+          let mut missing = Vec::new();
+          for &prop in &REQUIRED_PROPERTIES {
+            if !props.contains_key(&format!("{:?}", prop)) {
+              missing.push(format!("{:?}", prop));
+            }
+          }
+          if !missing.is_empty() {
+            println!("Faltan propiedades: {}", missing.join(", "));
+            continue;
+          }
+          // Verificar que no haya extras (opcional, pero para ser estricto)
+          let valid_keys: std::collections::HashSet<String> = REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect();
+          let extra: Vec<String> = props.keys().filter(|k| !valid_keys.contains(*k)).cloned().collect();
+          if !extra.is_empty() {
+            println!("Propiedades extra no válidas: {}", extra.join(", "));
+            continue;
+          }
+          mv.insert(smiles.to_string(), props);
+          break;
+        } else {
+          println!("Formato inválido. Usa Prop=val,Prop=val,...");
+        }
+      }
+    }
+    manual_values = Some(mv);
+  }
+
+  // Construir input JSON y ejecutar el paso 1 (ADMETSA) sin depender del
+  // `current_step` (modo interactivo). Usamos `step_name_by_index(1)` para
+  // obtener el nombre correcto del paso y `execute_step_by_index_unchecked`
+  // para ejecutarlo sin validar pasos previos adicionales.
+  let input = Step2Input { preferred_methods: preferred, method_property_map: None, manual_values };
+  let json_input = serde_json::to_value(&input)?;
+  let step_idx = 1;
+  let step_name = engine.step_name_by_index(step_idx)?;
+  if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
+    println!("Step2 ya fue ejecutado previamente para este flow; omitiendo.");
+    return Ok(());
+  }
+
+  let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
+  engine.persist_step_result(&step_name, info, -1, None)?;
+  println!("Step2 ejecutado y persistido.");
+  Ok(())
+}
+
+/// Ejecuta interactivamente Step3 (Molecule Initial)
+fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  println!("\n== Step3: Generación de Molécula Inicial ==");
+  println!("Métodos disponibles:");
+  println!("1) Manual: ingresar SMILES manualmente");
+  println!("2) Random: usar candidatos predefinidos (c1ccccc1, CCO)");
+  let choice = prompt("Elige método (1 o 2): ")?;
+  let method = match choice.trim() {
+    "1" => {
+      let smiles = prompt("Ingresa SMILES: ")?;
+      if smiles.trim().is_empty() {
+        println!("SMILES vacío; abortando.");
+        return Ok(());
+      }
+      GenerationMethod::Manual { smiles }
+    }
+    "2" => {
+      let candidates = vec!["c1ccccc1".to_string(), "CCO".to_string()];
+      GenerationMethod::Random { candidates }
+    }
+    _ => {
+      println!("Opción inválida.");
+      return Ok(());
+    }
+  };
+
+  let input = Step3Input { method };
+  let json_input = serde_json::to_value(&input)?;
+  let step_idx = 2;
+  let step_name = engine.step_name_by_index(step_idx)?;
+  if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
+    println!("Step3 ya fue ejecutado previamente para este flow; omitiendo.");
+    return Ok(());
+  }
+
+  let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
+  engine.persist_step_result(&step_name, info, -1, None)?;
+  println!("Step3 ejecutado y persistido.");
+  Ok(())
+}
+
+/// Crea una rama desde un cursor especificado por el usuario
+fn create_branch_from_engine(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
+    let flow_repo = engine.flow_repo();
+    let flow_id = engine.id();
+    let meta = flow_repo.get_flow_meta(&flow_id)?;
+    let current_cursor = meta.current_cursor;
+    println!("Cursor actual: {}", current_cursor);
+    let cursor_str = prompt("Ingresa el cursor desde donde crear la rama (debe ser <= {}): ")?;
+    let branch_cursor: i64 = cursor_str.trim().parse().map_err(|_| "Cursor inválido, debe ser un número entero")?;
+    if branch_cursor > current_cursor {
+        return Err("El cursor especificado es mayor que el cursor actual, no se puede ramificar desde un cursor no ejecutado".into());
+    }
+    if branch_cursor < 0 {
+        return Err("El cursor debe ser >= 0".into());
+    }
+    let branch_name = format!("branch_from_{}", branch_cursor);
+    let metadata = json!({"name": branch_name});
+    let branch_id = flow_repo.create_branch(&flow_id, branch_cursor, metadata)?;
+    println!("Rama creada: {} desde cursor {}", branch_id, branch_cursor);
+    Ok(())
+}/// Carga un flow existente seleccionando desde el repo
+fn load_flow_interactive() -> Result<Option<CadmaFlow>, Box<dyn Error>> {
+  let repo = new_flow_from_env()?;
+  let repo_arc = Arc::new(repo);
+  if let Some(flow_id) = select_flow_from_repo(&*repo_arc)? {
+    match ChemicalWorkflowFactory::load::<CadmaFlow>(&flow_id) {
+      Ok(loaded_box) => {
+        println!("Flow cargado: {} (current_step={})", flow_id, loaded_box.current_step());
+        return Ok(Some(*loaded_box));
+      }
+      Err(e) => {
+        println!("Error cargando flow con factory: {}, intentando carga manual sin snapshot", e);
+        // Carga manual: crear engine y aplicar snapshot si existe
+        let domain_repo = new_domain_from_env()?;
+        let mut engine = CadmaFlow::construct_with_repos(flow_id, repo_arc.clone(), Arc::new(domain_repo));
+        // Intentar cargar y aplicar el último snapshot
+        match repo_arc.load_latest_snapshot(&flow_id) {
+          Ok(Some(snapshot_meta)) => {
+            match repo_arc.load_snapshot(&snapshot_meta.id) {
+              Ok((data, _)) => {
+                match serde_json::from_slice(&data) {
+                  Ok(snapshot_json) => {
+                    if let Err(e2) = engine.apply_snapshot(&snapshot_json) {
+                      println!("Error aplicando snapshot: {}, continuando sin él", e2);
+                    } else {
+                      println!("Snapshot aplicado exitosamente");
+                    }
+                  }
+                  Err(e2) => println!("Error parseando snapshot JSON: {}, continuando sin él", e2),
+                }
+              }
+              Err(e2) => println!("Error cargando datos del snapshot: {}, continuando sin él", e2),
+            }
+          }
+          Ok(None) => println!("No hay snapshot disponible, cargando desde registros"),
+          Err(e2) => println!("Error obteniendo snapshot: {}, continuando sin él", e2),
+        }
+        // Rehidratar desde registros de flow_data si es necesario (el engine puede hacerlo internamente)
+        println!("Flow cargado manualmente: {} (current_step={})", flow_id, engine.current_step());
+        return Ok(Some(engine));
+      }
     }
   }
+  Ok(None)
+}
+
+/// Mostrar registros persistidos (flow_data) para el flow actual
+fn dump_flow_data(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
+  let repo = engine.flow_repo();
+  let rows = repo.read_data(&engine.id(), 0)?;
+  println!("Registros persistidos ({}):", rows.len());
+  for r in rows {
+    println!(" cursor={} key={} payload={}", r.cursor, r.key, r.payload);
+  }
+  Ok(())
+}
+
+fn list_families() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  let fams = repo.list_families()?;
+  println!("Familias encontradas: {}", fams.len());
+  for f in fams {
+    println!(" - {} ({} moléculas) id={}",
+             f.name().map(|s| s.to_string()).unwrap_or_default(),
+             f.molecules().len(),
+             f.id());
+  }
+  Ok(())
+}
+
+/// Crear una molécula y guardarla en el repositorio de dominio
+fn create_molecule_interactive() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  let smiles = prompt("SMILES de la molécula: ")?;
+  if smiles.trim().is_empty() {
+    println!("SMILES vacío; abortando.");
+    return Ok(());
+  }
+  match Molecule::from_smiles(&smiles) {
+    Ok(m) => match repo.save_molecule(m.clone()) {
+      Ok(inchikey) => {
+        println!("Molécula guardada con InChIKey: {}", inchikey);
+        Ok(())
+      }
+      Err(e) => Err(Box::new(e)),
+    },
+    Err(e) => {
+      println!("Error creando molécula desde SMILES: {}", e);
+      Ok(())
+    }
+  }
+}
+
+/// Crear una familia a partir de moléculas existentes en el repo
+fn create_family_from_molecules_interactive() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  let mols = repo.list_molecules()?;
   if mols.is_empty() {
-    println!("No se pudieron crear moléculas válidas desde los SMILES provistos");
+    println!("No hay moléculas en el repositorio. Crea primero algunas moléculas.");
     return Ok(());
   }
-  let name = prompt("Nombre de la nueva familia (opcional): ")?;
-  let desc = prompt("Descripción de la nueva familia (opcional): ")?;
-  let provenance = json!({ "created_by": "cadma_example_create_family", "timestamp": chrono::Utc::now().to_rfc3339() });
-  let mut family = chem_domain::MoleculeFamily::new(mols.into_iter(), provenance)?;
+  println!("Moléculas disponibles:");
+  for (i, m) in mols.iter().enumerate() {
+    println!("  {}: {} - {}", i + 1, m.smiles(), m.inchikey());
+  }
+  let raw = prompt("Indices de moléculas para la familia (coma separados, e.g. 1,3): ")?;
+  if raw.trim().is_empty() {
+    println!("No se seleccionaron moléculas; abortando.");
+    return Ok(());
+  }
+  let mut selected: Vec<Molecule> = Vec::new();
+  for tok in raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Ok(n) = tok.parse::<usize>() {
+      if n >= 1 && n <= mols.len() {
+        selected.push(mols[n - 1].clone());
+      } else {
+        println!("Índice fuera de rango: {} (ignorando)", n);
+      }
+    } else {
+      println!("Token inválido: {} (ignorando)", tok);
+    }
+  }
+  if selected.is_empty() {
+    println!("No hay moléculas válidas seleccionadas; abortando.");
+    return Ok(());
+  }
+  let name = prompt("Nombre de la familia (opcional): ")?;
+  let desc = prompt("Descripción (opcional): ")?;
+  let provenance = json!({"created_by": "cadma_example", "name": name.clone(), "description": desc.clone()});
+  let mut family = MoleculeFamily::new(selected, provenance)?;
   if !name.trim().is_empty() {
-    family = family.with_name(name)?;
+    family = family.with_name(name);
   }
   if !desc.trim().is_empty() {
-    family = family.with_description(desc)?;
+    family = family.with_description(desc);
   }
   match repo.save_family(family) {
-    Ok(id) => println!("Familia creada con id={}", id),
-    Err(e) => println!("Error guardando familia: {}", e),
-  }
-  Ok(())
-}
-// ========== MAIN APPLICATION ==========
-fn setup_repository() -> Result<Arc<dyn FlowRepository>, Box<dyn Error>> {
-  match new_flow_from_env() {
-    Ok(repo) => Ok(Arc::new(repo)),
-    Err(e) => {
-      let error_msg = e.to_string();
-      if error_msg.contains("was compiled without 'pg' feature") {
-        eprintln!("\n❌ Error de configuración:");
-        eprintln!("   chem-persistence fue compilado sin soporte para PostgreSQL");
-        eprintln!("   pero DATABASE_URL apunta a una base PostgreSQL.");
-        eprintln!("\n💡 Soluciones:");
-        eprintln!("   1) Compilar con soporte PostgreSQL:");
-        eprintln!("      cargo run -p chem-workflow --example cadma_example --features pg");
-        eprintln!("   2) Usar SQLite:");
-        eprintln!("      export DATABASE_URL=\"file:./chemflow_demo.db\"");
-      }
-      Err(Box::new(e))
+    Ok(id) => {
+      println!("Familia creada y guardada con id: {}", id);
+      Ok(())
     }
+    Err(e) => Err(Box::new(e)),
   }
 }
+
+fn save_snapshot(engine: &CadmaFlow) {
+  match engine.save_snapshot() {
+    Ok(_) => println!("Snapshot guardado (best-effort)."),
+    Err(e) => println!("Error guardando snapshot: {}", e),
+  }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
-  println!("🚀 Iniciando CadmaFlow Demo");
-  // Configuración inicial
-  let _repo = setup_repository()?;
-  // Bucle principal de la aplicación
+  println!("🚀 CadmaFlow Interactive Demo (mejorado)");
+  // Inicializar repositorio (verificamos configuración)
+  let _flow_repo = match new_flow_from_env() {
+    Ok(r) => Arc::new(r) as Arc<dyn FlowRepository>,
+    Err(e) => {
+      eprintln!("No se pudo inicializar flow repo: {}", e);
+      return Err(Box::new(e));
+    }
+  };
+
+  // Estado del engine en memoria (podemos crear o cargar)
+  let mut maybe_engine: Option<CadmaFlow> = None;
+
   loop {
-    print_menu();
-    match prompt("Opción: ")?.trim() {
-      "1" => create_flow()?,
-      "2" => list_flows()?,
-      "3" => select_and_run_flow()?,
-      "4" => create_branch()?,
-      "5" => view_flow_steps()?,
-      "6" => dump_all_flows()?,
-      "7" => create_family_from_smiles_interactive()?,
-      "8" => list_families_with_molecules()?,
+    println!("\n== Menú principal ==");
+    println!("1) Crear flow nuevo");
+    println!("2) Cargar flow existente");
+    println!("3) Mostrar metadata / estado del flow cargado");
+    println!("4) Ejecutar Step1 (Family)");
+    println!("5) Ejecutar Step2 (ADMETSA)");
+    println!("6) Ejecutar Step3 (Molecule Initial)");
+    println!("7) Crear rama desde cursor especificado");
+    println!("7) Crear rama desde cursor especificado");
+    println!("8) Dump flow_data (registros persistidos)");
+    println!("9) Listar familias (dominio)");
+    println!("a) Crear molécula (persistir en dominio)");
+    println!("b) Crear familia desde moléculas existentes en dominio");
+    println!("0) Guardar snapshot");
+    println!("q) Salir");
+
+    let opt = prompt("Opción: ")?;
+    match opt.as_str() {
+      "1" => match create_flow_interactive() {
+        Ok(engine) => {
+          maybe_engine = Some(engine);
+        }
+        Err(e) => println!("Error creando flow: {}", e),
+      },
+      "2" => {
+        if let Some(engine) = load_flow_interactive()? {
+          maybe_engine = Some(engine)
+        }
+      }
+      "3" => {
+        if let Some(engine) = &maybe_engine {
+          show_metadata(engine);
+        } else {
+          println!("No hay flow cargado en memoria.");
+        }
+      }
+      "4" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          // Manejar el posible error en lugar de `unwrap()` que paniquea.
+          if let Err(e) = run_step1(engine) {
+            println!("Error ejecutando Step1: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "5" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          if let Err(e) = run_step2(engine) {
+            println!("Error en Step2: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "6" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          if let Err(e) = run_step3(engine) {
+            println!("Error en Step3: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "7" => {
+        if let Some(engine) = &maybe_engine {
+          if let Err(e) = create_branch_from_engine(engine) {
+            println!("Error creando rama: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "8" => {
+        if let Some(engine) = &maybe_engine {
+          if let Err(e) = dump_flow_data(engine) {
+            println!("Error volcando flow_data: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "9" => {
+        if let Err(e) = list_families() {
+          println!("Error listando familias: {}", e);
+        }
+      }
+      "0" => {
+        if let Some(engine) = &maybe_engine {
+          save_snapshot(engine);
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
       "q" | "Q" => {
-        println!("👋 ¡Hasta pronto!");
+        println!("👋 Saliendo.");
         break;
       }
-      other => println!("❌ Opción no válida: {}", other),
+      other => println!("Opción no válida: {}", other),
     }
   }
+
   Ok(())
 }

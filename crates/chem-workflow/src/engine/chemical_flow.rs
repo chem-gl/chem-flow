@@ -4,11 +4,12 @@ use crate::{workflow_type::WorkflowType, WorkflowError};
 use base64::Engine;
 use chem_domain::DomainRepository;
 use chrono::Utc;
+use flow::domain::{FlowData, PersistResult};
 use flow::repository::FlowRepository;
-use flow::{FlowData, PersistResult};
 use serde_json::Value as JsonValue;
 use std::{error::Error, sync::Arc};
 use uuid::Uuid;
+
 // ========== DEFINICIONES DE TIPOS ==========
 /// Estado público común a todos los engines
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,37 +20,63 @@ pub enum FlowStatus {
   Failed,
   Unknown,
 }
-// ========== TRAIT PRINCIPAL ==========
-/// Trait genérico para motores de flujo químicos
+
 pub trait ChemicalFlowEngine: Send + Sync {
   // === MÉTODOS REQUERIDOS (IMPLEMENTACIÓN ESPECÍFICA) ===
   /// Identificador único del engine
   fn id(&self) -> Uuid;
+
   /// Restaura el estado desde un snapshot
   fn apply_snapshot(&mut self, snapshot: &JsonValue) -> Result<(), Box<dyn Error>>;
+
   /// Crea un snapshot del estado actual
   fn snapshot(&self) -> Result<JsonValue, Box<dyn Error>>;
+
   /// Tipo de workflow específico del engine
   fn engine_workflow_type() -> WorkflowType
     where Self: Sized;
-  /// Constructor principal con repositorios inyectados
+
+  /// Construye una instancia con repositorios
   fn construct_with_repos(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn DomainRepository>) -> Self
     where Self: Sized;
-  /// Acceso al repositorio de flujo
+
+  /// Obtiene la referencia al repositorio de flows
   fn flow_repo(&self) -> &Arc<dyn FlowRepository>;
-  /// Acceso al repositorio de dominio
+
+  /// Obtiene la referencia al repositorio de dominio
   fn domain_repo(&self) -> &Arc<dyn DomainRepository>;
-  /// Obtiene el paso actual del workflow
+
+  /// Obtiene el paso actual como trait object dinámico
   fn get_current_step(&self) -> Result<Box<dyn crate::step::WorkflowStepDyn>, WorkflowError>;
-  // === MÉTODOS CON IMPLEMENTACIÓN POR DEFECTO ===
-  // --- Constructores ---
+
+  /// Obtiene el nombre del paso por índice
+  fn step_name_by_index(&self, idx: u32) -> Result<String, WorkflowError>;
+
+  /// Obtener una instancia del paso por índice sin depender del estado
+  /// `current_step`. Esto permite a clientes (por ejemplo demos) ejecutar
+  /// pasos concretos por su índice incluso si el `current_step` interno no
+  /// está sincronizado. La macro `impl_chemical_flow!` implementa este
+  /// método para cada flujo concreto.
+  fn get_step_by_index(&self, idx: u32) -> Result<Box<dyn crate::step::WorkflowStepDyn>, WorkflowError>;
+
+  /// Ejecuta un paso por índice sin realizar las comprobaciones de pasos
+  /// previos (modo "forzado" / interactivo). Implementación por defecto
+  /// que obtiene la instancia del paso mediante `get_step_by_index` y la
+  /// ejecuta con un `StepContext` nuevo.
+  fn execute_step_by_index_unchecked(&mut self, idx: u32, input: &JsonValue) -> Result<StepInfo, WorkflowError> {
+    let step = self.get_step_by_index(idx)?;
+    let ctx = StepContext::new(self.id(), self.flow_repo().clone(), self.domain_repo().clone());
+    step.execute(&ctx, input)
+  }
+
   /// Crea una nueva instancia del engine
   fn new(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn DomainRepository>) -> Self
     where Self: Sized
   {
     Self::construct_with_repos(id, flow_repo, domain_repo)
   }
-  /// Rehidrata un engine existente desde persistencia
+
+  /// Rehidrata una instancia existente desde almacenamiento
   fn rehydrate(id: Uuid,
                flow_repo: Arc<dyn FlowRepository>,
                domain_repo: Arc<dyn DomainRepository>)
@@ -60,9 +87,8 @@ pub trait ChemicalFlowEngine: Send + Sync {
     engine.rehydrate_from_storage()?;
     Ok(engine)
   }
-  /// Crea una nueva rama a partir del flow actual delegando en el repo
-  /// y devuelve una instancia rehidratada del engine apuntando al nuevo
-  /// `flow_id`. Esto hace la operación más ergonómica desde el caller.
+
+  /// Crea una nueva rama desde un cursor padre
   fn new_branch(&self, parent_cursor: i64, metadata: JsonValue) -> Result<Self, WorkflowError>
     where Self: Sized
   {
@@ -73,20 +99,23 @@ pub trait ChemicalFlowEngine: Send + Sync {
     new.rehydrate_from_storage()?;
     Ok(new)
   }
-  /// Conveniencia para delegar a `FlowRepository::branch_exists`
+
+  /// Verifica si una rama existe
   fn branch_exists(&self, flow_id: &Uuid) -> Result<bool, WorkflowError> {
     self.flow_repo().branch_exists(flow_id).map_err(|e| WorkflowError::Persistence(format!("branch_exists error: {}", e)))
   }
-  /// Conveniencia para delegar a `FlowRepository::delete_branch`
+
+  /// Elimina una rama
   fn delete_branch(&self, flow_id: &Uuid) -> Result<(), WorkflowError> {
     self.flow_repo().delete_branch(flow_id).map_err(|e| WorkflowError::Persistence(format!("delete_branch error: {}", e)))
   }
-  // --- Gestión de estado del flow ---
-  /// Número del paso actual
+
+  /// Obtiene el índice del paso actual
   fn current_step(&self) -> u32 {
     self.extract_metadata_field("current_step").and_then(|v| v.as_u64()).map(|step| step as u32).unwrap_or(0)
   }
-  /// Estado actual del flujo
+
+  /// Obtiene el estado actual del flujo
   fn status(&self) -> FlowStatus {
     self.extract_metadata_field("status")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -99,11 +128,12 @@ pub trait ChemicalFlowEngine: Send + Sync {
         })
         .unwrap_or(FlowStatus::Unknown)
   }
-  // --- Ejecución de pasos ---
+
   /// Nombre del paso actual
   fn current_step_name(&self) -> Result<String, WorkflowError> {
     self.get_current_step().map(|step| step.name().to_string())
   }
+
   /// Ejecuta el paso actual con entrada JSON
   fn execute_current_step(&mut self, input: &JsonValue) -> Result<StepInfo, WorkflowError> {
     let step = self.get_current_step()?;
@@ -112,13 +142,14 @@ pub trait ChemicalFlowEngine: Send + Sync {
     let ctx = StepContext::new(self.id(), self.flow_repo().clone(), self.domain_repo().clone());
     step.execute(&ctx, input)
   }
-  /// Ejecuta el paso actual con entrada tipada
+
+  /// Ejecuta el paso actual con entrada tipada serializable
   fn execute_current_step_typed<I: serde::Serialize>(&mut self, input: &I) -> Result<StepInfo, WorkflowError> {
     let json_input = serde_json::to_value(input)?;
     self.execute_current_step(&json_input)
   }
-  // --- Persistencia de datos ---
-  /// Persiste el resultado de un paso ejecutado
+
+  /// Persiste el resultado de un paso
   fn persist_step_result(&self,
                          step_name: &str,
                          info: StepInfo,
@@ -140,11 +171,13 @@ pub trait ChemicalFlowEngine: Send + Sync {
     }
     Ok(result)
   }
+
   // --- Operaciones de avance y validación ---
-  /// Avanza al siguiente paso
+  /// Avanza al siguiente paso actualizando los metadatos
   fn advance_step(&mut self) -> Result<(), WorkflowError> {
     self.update_metadata_field("current_step", JsonValue::from(self.current_step() + 1))
   }
+
   // --- Operaciones de repositorio delegadas ---
   /// Lee el payload del último paso ejecutado
   fn get_last_step_payload(&self, step_name: &str) -> Result<Option<JsonValue>, WorkflowError> {
@@ -153,47 +186,102 @@ pub trait ChemicalFlowEngine: Send + Sync {
     let payload = data.into_iter().rev().find(|fd| fd.key.eq_ignore_ascii_case(&key)).map(|fd| fd.payload);
     Ok(payload)
   }
+
   /// Obtiene metadatos específicos
   fn get_metadata(&self, key: &str) -> Result<JsonValue, WorkflowError> {
     self.flow_repo().get_meta(&self.id(), key).map_err(|e| WorkflowError::Persistence(format!("get_meta error: {}", e)))
   }
+
   /// Establece metadatos
   fn set_metadata(&self, key: &str, value: JsonValue) -> Result<(), WorkflowError> {
     self.flow_repo()
         .set_meta(&self.id(), key, value)
         .map_err(|e| WorkflowError::Persistence(format!("set_meta error: {}", e)))
   }
-  // === MÉTODOS PRIVADOS (IMPLEMENTACIÓN INTERNA) ===
-  /// Valida que el paso pueda ejecutarse
+
+  /// Valida la ejecución del paso actual
   fn validate_step_execution(&self, step_name: &str) -> Result<(), WorkflowError> {
     // Verificar que no se re-ejecute un paso ya completado
     if self.get_last_step_payload(step_name)?.is_some() {
       return Err(WorkflowError::Validation(format!("El paso '{}' ya fue ejecutado para este flow", step_name)));
     }
-    // Verificar dependencias de pasos previos
-    let required_steps: Vec<String> = (0..self.current_step()).map(|i| format!("step{}", i + 1)).collect();
+    // Determinar el índice del paso que se está validando (buscar por nombre).
+    // Recorremos los índices válidos hasta que la función `step_name_by_index`
+    // devuelva Err (fuera de rango). Si el paso no existe, devolvemos error.
+    let mut step_idx_opt: Option<u32> = None;
+    let mut i: u32 = 0;
+    while let Ok(n) = self.step_name_by_index(i) {
+      if n == step_name {
+        step_idx_opt = Some(i);
+        break;
+      }
+      i = i.saturating_add(1);
+    }
+
+    let step_idx = match step_idx_opt {
+      Some(idx) => idx,
+      None => return Err(WorkflowError::Validation(format!("step mapping error: no se encontró el paso '{}'", step_name))),
+    };
+
+    // Si es el primer paso (índice 0) no requerimos pasos previos.
+    if step_idx == 0 {
+      return Ok(());
+    }
+
+    // Requerimos únicamente la presencia de los pasos estrictamente anteriores
+    // al índice del paso que se está validando (0..step_idx).
+    let mut required_steps: Vec<String> = Vec::new();
+    for j in 0..step_idx {
+      match self.step_name_by_index(j) {
+        Ok(n) => required_steps.push(n),
+        Err(e) => return Err(WorkflowError::Validation(format!("step mapping error: {}", e))),
+      }
+    }
+    // Excluir el paso que se valida por si acaso (defensa adicional)
+    required_steps.retain(|s| s != step_name);
     self.ensure_previous_steps_present(&required_steps)
   }
+
   /// Verifica que los pasos requeridos estén presentes
   fn ensure_previous_steps_present(&self, required: &[String]) -> Result<(), WorkflowError> {
-    let missing: Vec<String> =
-      required.iter().filter(|req| self.get_last_step_payload(req).ok().flatten().is_none()).cloned().collect();
+    // DEBUG: imprimimos qué pasos se requieren y si se encontró payload
+    let mut missing: Vec<String> = Vec::new();
+    for req in required.iter() {
+      match self.get_last_step_payload(req) {
+        Ok(Some(_)) => {
+          // encontrado
+        }
+        Ok(None) => {
+          println!("[DEBUG] Paso requerido '{}' no tiene payload (get_last_step_payload returned None)",
+                   req);
+          missing.push(req.clone());
+        }
+        Err(e) => {
+          println!("[DEBUG] get_last_step_payload error para '{}': {:?}", req, e);
+          missing.push(req.clone());
+        }
+      }
+    }
     if missing.is_empty() {
       Ok(())
     } else {
       Err(WorkflowError::Validation(format!("Datos faltantes de pasos previos: {:?}", missing)))
     }
   }
+
   /// Calcula cursor y versión para persistencia
   fn calculate_cursor_and_version(&self, expected_version: i64) -> Result<(i64, i64), WorkflowError> {
-    self.flow_repo()
-        .get_flow_meta(&self.id())
-        .map(|meta| {
-          let version = if expected_version < 0 { meta.current_version } else { expected_version };
-          (meta.current_cursor + 1, version)
-        })
-        .or(Ok((0, expected_version)))
+    let meta_res = self.flow_repo().get_flow_meta(&self.id());
+    let (cursor, version) = match meta_res {
+      Ok(meta) => {
+        let v = if expected_version < 0 { meta.current_version } else { expected_version };
+        (meta.current_cursor + 1, v)
+      }
+      Err(_) => (0, expected_version),
+    };
+    Ok((cursor, version))
   }
+
   /// Actualiza el estado del engine después de persistir
   fn update_engine_state_after_persist(&self, cursor: i64) -> Result<(), WorkflowError> {
     // Después de persistir un paso con cursor `cursor`, el siguiente
@@ -205,6 +293,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
     let _ = self.save_snapshot();
     Ok(())
   }
+
   /// Guarda snapshot del estado actual
   fn save_snapshot(&self) -> Result<(), WorkflowError> {
     let snapshot = self.snapshot().map_err(|e| WorkflowError::Persistence(format!("snapshot error: {}", e)))?;
@@ -216,25 +305,29 @@ pub trait ChemicalFlowEngine: Send + Sync {
                                     self.get_metadata("flow_metadata")?)?;
     Ok(())
   }
+
   /// Rehidrata el engine desde el almacenamiento
   fn rehydrate_from_storage(&mut self) -> Result<(), WorkflowError> {
     self.rehydrate_from_snapshot()?;
     self.synchronize_step_state()?;
     Ok(())
   }
+
   /// Rehidrata desde snapshot si está disponible
   fn rehydrate_from_snapshot(&mut self) -> Result<(), WorkflowError> {
     if let Some(snapshot_meta) = self.flow_repo().load_latest_snapshot(&self.id())? {
-      let (bytes, _meta) = self.flow_repo().load_snapshot(&snapshot_meta.id)?;
-      if let Ok(state_b64) = String::from_utf8(bytes) {
-        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(state_b64.as_bytes()) {
-          let snapshot: JsonValue = serde_json::from_slice(&decoded)?;
-          self.apply_snapshot(&snapshot).map_err(|e| WorkflowError::Persistence(format!("apply_snapshot error: {}", e)))?;
+      if let Ok((bytes, _meta)) = self.flow_repo().load_snapshot(&snapshot_meta.id) {
+        if let Ok(state_b64) = String::from_utf8(bytes) {
+          if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(state_b64.as_bytes()) {
+            let snapshot: JsonValue = serde_json::from_slice(&decoded)?;
+            self.apply_snapshot(&snapshot).map_err(|e| WorkflowError::Persistence(format!("apply_snapshot error: {}", e)))?;
+          }
         }
       }
     }
     Ok(())
   }
+
   /// Sincroniza el estado del paso desde metadata o datos persistentes
   fn synchronize_step_state(&mut self) -> Result<(), WorkflowError> {
     match self.get_metadata("flow_metadata") {
@@ -242,6 +335,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
       _ => self.recover_step_from_fallback_sources(),
     }
   }
+
   /// Aplica metadata del flujo al estado interno
   fn apply_flow_metadata(&mut self, meta: JsonValue) -> Result<(), WorkflowError> {
     // Actualizar el estado interno del engine para reflejar la metadata
@@ -257,6 +351,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
     let _ = self.update_metadata_field("flow_metadata", meta);
     Ok(())
   }
+
   /// Recupera el estado del paso desde fuentes alternativas
   fn recover_step_from_fallback_sources(&mut self) -> Result<(), WorkflowError> {
     let step = self.determine_current_step_from_data()?;
@@ -270,6 +365,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
     // las rutas comunes; aquí dejamos sólo la metadata sincronizada.
     Ok(())
   }
+
   /// Determina el paso actual analizando datos persistentes
   fn determine_current_step_from_data(&self) -> Result<u32, WorkflowError> {
     // Intentar desde flow_data
@@ -280,12 +376,19 @@ pub trait ChemicalFlowEngine: Send + Sync {
       }
     }
     // Fallback a metadata del flow
-    self.flow_repo().get_flow_meta(&self.id()).map(|meta| (meta.current_cursor as u32).saturating_add(1)).or(Ok(0))
+    let meta_res = self.flow_repo().get_flow_meta(&self.id());
+    let step = match meta_res {
+      Ok(meta) => (meta.current_cursor as u32).saturating_add(1),
+      Err(_) => 0,
+    };
+    Ok(step)
   }
+
   /// Extrae un campo específico de los metadatos
   fn extract_metadata_field(&self, field: &str) -> Option<JsonValue> {
     self.get_metadata("flow_metadata").ok().and_then(|meta| meta.get(field).cloned())
   }
+
   /// Actualiza un campo específico en los metadatos
   fn update_metadata_field(&mut self, field: &str, value: JsonValue) -> Result<(), WorkflowError> {
     let mut metadata = self.extract_metadata_field("flow_metadata").and_then(|m| m.as_object().cloned()).unwrap_or_default();
@@ -293,25 +396,30 @@ pub trait ChemicalFlowEngine: Send + Sync {
     self.set_metadata("flow_metadata", JsonValue::Object(metadata))
   }
 }
+
 // ========== MACRO OPTIMIZADO ==========
 /// Macro para implementar ChemicalFlowEngine con mínimo boilerplate
 #[macro_export]
 macro_rules! impl_chemical_flow {
-    ($flow_ty:ty, $state_ty:ty, $workflow_type:expr, { $($idx:expr => $step:path),* $(,)? }) => {
+    ($flow_ty:ty, $state_ty:ty, $workflow_type:expr, { $($idx:expr => $step:ty),* $(,)? }) => {
         impl $crate::engine::ChemicalFlowEngine for $flow_ty {
             fn id(&self) -> ::uuid::Uuid {
                 self.id
             }
+
             fn apply_snapshot(&mut self, snapshot: &::serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
                 self.state = ::serde_json::from_value(snapshot.clone())?;
                 Ok(())
             }
+
             fn snapshot(&self) -> Result<::serde_json::Value, Box<dyn std::error::Error>> {
                 ::serde_json::to_value(&self.state).map_err(Into::into)
             }
+
             fn engine_workflow_type() -> $crate::workflow_type::WorkflowType {
                 $workflow_type
             }
+
             fn construct_with_repos(
                 id: ::uuid::Uuid,
                 flow_repo: ::std::sync::Arc<dyn ::flow::repository::FlowRepository>,
@@ -319,18 +427,34 @@ macro_rules! impl_chemical_flow {
             ) -> Self {
                 Self { id, state: Default::default(), flow_repo, domain_repo }
             }
+
             fn flow_repo(&self) -> &::std::sync::Arc<dyn ::flow::repository::FlowRepository> {
                 &self.flow_repo
             }
+
             fn domain_repo(&self) -> &::std::sync::Arc<dyn ::chem_domain::DomainRepository> {
                 &self.domain_repo
             }
+
             fn get_current_step(&self) -> Result<Box<dyn $crate::step::WorkflowStepDyn>, $crate::WorkflowError> {
-                match self.state.current_step {
-                    $( $idx => Ok(Box::new($step)), )*
+        // Delega en get_step_by_index para evitar duplicar la tabla de pasos
+        self.get_step_by_index(self.state.current_step)
+            }
+
+      fn get_step_by_index(&self, idx: u32) -> Result<Box<dyn $crate::step::WorkflowStepDyn>, $crate::WorkflowError> {
+        match idx {
+          $( $idx => Ok(Box::new(<$step>::default())), )*
+          _ => Err($crate::WorkflowError::Validation("No hay más pasos".into())),
+        }
+      }
+
+            fn step_name_by_index(&self, idx: u32) -> Result<String, $crate::WorkflowError> {
+                match idx {
+                    $( $idx => Ok(::std::any::type_name::<$step>().rsplitn(2, "::").next().unwrap().to_string()), )*
                     _ => Err($crate::WorkflowError::Validation("No hay más pasos".into())),
                 }
             }
+
             // Override default to apply metadata into the concrete state
             fn apply_flow_metadata(&mut self, meta: ::serde_json::Value) -> Result<(), $crate::WorkflowError> {
                 if let Some(step) = meta.get("current_step").and_then(|v| v.as_u64()) {

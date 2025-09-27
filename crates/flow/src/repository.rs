@@ -1,3 +1,4 @@
+//ahora serian los demas repository
 // Archivo: repository.rs
 // Propósito: definir el trait `FlowRepository` y los traits auxiliares
 // (`SnapshotStore`, `ArtifactStore`). Describe el contrato que deben

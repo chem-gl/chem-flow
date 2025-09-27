@@ -7,8 +7,8 @@
 use crate::errors::WorkflowError;
 use crate::step::StepInfo;
 use chem_domain::DomainRepository;
+use flow::domain::PersistResult;
 use flow::repository::FlowRepository;
-use flow::PersistResult;
 use serde::de::DeserializeOwned;
 use std::sync::Arc;
 use uuid::Uuid;

@@ -1,69 +1,24 @@
-// Paso ADMETSA (Step2)
-//
-// Descripción (es):
-// Este paso calcula propiedades ADMETSA para todas las moléculas de la familia
-// proporcionada por el paso anterior (Step1). Entrada (Step2Input):
-// - preferred_methods: orden de preferencia de  los métodos a usar para generar
-//   propiedades si solo se indica este se asegura que todas las propiedades se
-//   puedan generar
-// - method_property_map: mapa opcional que asigna propiedades a métodos
-//   específicos //deben completar las que falten arriba o sobre-escribirlas
-//   igual se deben guardar en caso que aun falte se deberan agregar manualmente
-// - manual_values: mapa opcional con valores manuales por SMILES y propiedad.
-//
-// Comportamiento:
-// 1. Se valida que la combinación de `method_property_map` y
-//    `preferred_methods` cubra el conjunto de `REQUIRED_PROPERTIES`.
-// 2. Para cada molécula y cada propiedad requerida se determina el método a
-//    usar (mapa explícito o el primer método preferido que pueda generarla).
-// 3. Si existe un valor manual para esa molécula+propiedad (en
-//    `manual_values`), se usa ese valor.
-// 4. Si el método asignado es `Manual` pero no existe valor en `manual_values`,
-//    el paso falla con error de validación (no se genera automáticamente).
-// 5. Para métodos aleatorios (Random1/2/3/4) en esta implementación de pruebas
-//    se generan valores mock estáticos por propiedad.
-// 6. Todos los valores generados (incluyendo metadata con método/fuente/step)
-//    se persisten usando `ctx.domain_repo.save_molecular_property(...)`.
-//
-// Implementación futura:
-// - Integrar `chem_providers::ChemEngine` para cálculos reales según método.
-// - Soportar múltiples valores por propiedad y reglas de preferencia más
-//   avanzadas.
+// admetsa_properties_step2.rs
+//! Paso 2: calcular propiedades ADMETSA para todas las moléculas de la familia
+//! creada/seleccionada en Step1.
+//! - Soporta "method_property_map" y "preferred_methods".
+//! - Los valores manuales se pueden suministrar por SMILES.
+//! - Guarda cada propiedad en domain_repo como OwnedMolecularProperty.
 
-// Paso ADMETSA (Step2)
-use crate::{flows::cadma_flow::steps::family_reference_step1::Step1Payload, step::StepContext, WorkflowError};
-use chem_domain::OwnedMolecularProperty;
+use crate::errors::WorkflowError;
+use crate::flows::cadma_flow::steps::family_reference_step1::Step1Payload;
+use crate::step::StepContext;
+use chem_domain::{Molecule, OwnedMolecularProperty};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
-// Types principales - usando newtype pattern para mayor seguridad
+/// Tipos auxiliares:
+/// ManualValues: SMILES -> (prop_name_string -> value)
+pub type PropertyValues = HashMap<String, f64>;
 pub type ManualValues = HashMap<String, PropertyValues>;
-pub type PropertyValues = HashMap<ADMETSAProperty, f64>;
 pub type MethodPropertyMap = HashMap<ADMETSAProperty, ADMETSAMethod>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeneratedPropertyEntry {
-  pub id: Uuid,
-  pub property_type: String,
-  pub value: f64,
-  pub method: String,
-  pub metadata: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SelectedPropertyEntry {
-  pub id: Uuid,
-  pub property_type: String,
-  pub value: f64,
-  pub method: String,
-}
-
-// Colecciones optimizadas
-pub type AllPropertiesFull = HashMap<String, Vec<GeneratedPropertyEntry>>;
-pub type SelectedProperties = HashMap<String, HashMap<String, SelectedPropertyEntry>>;
-
-// Enums principales
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ADMETSAMethod {
   Manual,
@@ -75,7 +30,6 @@ pub enum ADMETSAMethod {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ADMETSAProperty {
-  // Fisicoquímicas
   LogP,
   PSA,
   AtX,
@@ -83,15 +37,12 @@ pub enum ADMETSAProperty {
   HBD,
   RB,
   MR,
-  // Toxicológicas
   LD50,
   Mutagenicity,
   DevelopmentalToxicity,
-  // Sintéticas
   SyntheticAccessibility,
 }
 
-// Constantes optimizadas
 pub const REQUIRED_PROPERTIES: [ADMETSAProperty; 11] = [ADMETSAProperty::LogP,
                                                         ADMETSAProperty::PSA,
                                                         ADMETSAProperty::AtX,
@@ -104,11 +55,9 @@ pub const REQUIRED_PROPERTIES: [ADMETSAProperty; 11] = [ADMETSAProperty::LogP,
                                                         ADMETSAProperty::DevelopmentalToxicity,
                                                         ADMETSAProperty::SyntheticAccessibility];
 
-// List of all supported methods (facilita iteración/consulta desde UI/tests)
 pub const ALL_METHODS: [ADMETSAMethod; 5] =
   [ADMETSAMethod::Manual, ADMETSAMethod::Random1, ADMETSAMethod::Random2, ADMETSAMethod::Random3, ADMETSAMethod::Random4];
 
-// Implementación eficiente usando match en tiempo de compilación
 impl ADMETSAMethod {
   pub const fn can_generate(self, prop: ADMETSAProperty) -> bool {
     use ADMETSAProperty::*;
@@ -116,7 +65,8 @@ impl ADMETSAMethod {
              (Self::Manual, _)
              | (Self::Random1, LogP | PSA | AtX | HBA | HBD | RB | MR)
              | (Self::Random2, LD50 | Mutagenicity | DevelopmentalToxicity | SyntheticAccessibility)
-             | (Self::Random3, HBD | RB | MR | LD50 | Mutagenicity))
+             | (Self::Random3, HBD | RB | MR | LD50 | Mutagenicity)
+             | (Self::Random4, _))
   }
 
   pub const fn calculate_mock_value(self, prop: ADMETSAProperty) -> f64 {
@@ -140,18 +90,49 @@ impl ADMETSAMethod {
       (Self::Random3, ADMETSAProperty::LD50) => 250.0,
       (Self::Random3, ADMETSAProperty::Mutagenicity) => 1.0,
 
+      (Self::Random4, ADMETSAProperty::LogP) => 3.1,
+      (Self::Random4, ADMETSAProperty::PSA) => 50.0,
+      (Self::Random4, ADMETSAProperty::AtX) => 25.0,
+      (Self::Random4, ADMETSAProperty::HBA) => 4.0,
+      (Self::Random4, ADMETSAProperty::HBD) => 1.5,
+      (Self::Random4, ADMETSAProperty::RB) => 4.0,
+      (Self::Random4, ADMETSAProperty::MR) => 65.0,
+      (Self::Random4, ADMETSAProperty::LD50) => 300.0,
+      (Self::Random4, ADMETSAProperty::Mutagenicity) => 0.5,
+      (Self::Random4, ADMETSAProperty::DevelopmentalToxicity) => 0.2,
+      (Self::Random4, ADMETSAProperty::SyntheticAccessibility) => 2.8,
+
       _ => 0.0,
     }
   }
 }
 
-// Structs de datos optimizados
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step2Input {
   pub preferred_methods: Vec<ADMETSAMethod>,
   pub method_property_map: Option<MethodPropertyMap>,
   pub manual_values: Option<ManualValues>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedPropertyEntry {
+  pub id: Uuid,
+  pub property_type: String,
+  pub value: f64,
+  pub method: String,
+  pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SelectedPropertyEntry {
+  pub id: Uuid,
+  pub property_type: String,
+  pub value: f64,
+  pub method: String,
+}
+
+pub type AllPropertiesFull = HashMap<String, Vec<GeneratedPropertyEntry>>; // SMILES -> entries
+pub type SelectedProperties = HashMap<String, HashMap<String, SelectedPropertyEntry>>; // SMILES -> prop -> chosen entry
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step2Payload {
@@ -175,167 +156,31 @@ pub struct Step2Params {
   pub input: Step2Input,
 }
 
-// Builder pattern para configuración
-#[derive(Debug, Default)]
-pub struct Step2Config {
-  preferred_methods: Vec<ADMETSAMethod>,
-  method_property_map: Option<MethodPropertyMap>,
-  manual_values: Option<ManualValues>,
-}
-
-impl Step2Config {
-  pub fn new() -> Self {
-    Self::default()
-  }
-
-  pub fn preferred_methods(mut self, methods: Vec<ADMETSAMethod>) -> Self {
-    self.preferred_methods = methods;
-    self
-  }
-
-  pub fn method_property_map(mut self, map: MethodPropertyMap) -> Self {
-    self.method_property_map = Some(map);
-    self
-  }
-
-  pub fn manual_values(mut self, values: ManualValues) -> Self {
-    self.manual_values = Some(values);
-    self
-  }
-
-  pub fn build(self) -> Step2Input {
-    Step2Input { preferred_methods: self.preferred_methods,
-                 method_property_map: self.method_property_map,
-                 manual_values: self.manual_values }
-  }
-}
-
-// Implementación principal optimizada
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct ADMETSAPropertiesStep2;
 
 impl ADMETSAPropertiesStep2 {
-  /// Devuelve un mapa que indica, para cada método, las propiedades que puede
-  /// generar. Útil para UIs y validaciones antes de construir el
-  /// `Step2Input`.
-  pub fn methods_capabilities() -> std::collections::HashMap<ADMETSAMethod, Vec<ADMETSAProperty>> {
-    let mut map = std::collections::HashMap::new();
-    for &m in &ALL_METHODS {
-      let mut props = Vec::new();
-      for &p in REQUIRED_PROPERTIES.iter() {
-        if m.can_generate(p) || m == ADMETSAMethod::Manual {
-          props.push(p);
-        }
-      }
-      map.insert(m, props);
-    }
-    map
-  }
+  /// Validación principal: el mapeo + métodos preferidos deben cubrir las
+  /// propiedades requeridas.
+  fn validate_methods_cover(&self, input: &Step2Input) -> Result<(), WorkflowError> {
+    let mut covered = HashSet::<ADMETSAProperty>::new();
 
-  /// Verifica si la lista de métodos preferidos cubre todas las propiedades
-  /// requeridas (es decir, para cada propiedad existe al menos un método
-  /// preferido que pueda generarla).
-  pub fn validate_preferred_methods_cover(preferred: &[ADMETSAMethod]) -> Result<(), WorkflowError> {
-    use std::collections::HashSet;
-    let mut covered = HashSet::new();
-    for &m in preferred {
-      for &p in REQUIRED_PROPERTIES.iter() {
-        if m.can_generate(p) || m == ADMETSAMethod::Manual {
-          covered.insert(p);
-        }
-      }
-    }
-    for &p in REQUIRED_PROPERTIES.iter() {
-      if !covered.contains(&p) {
-        return Err(WorkflowError::Validation(format!("Preferred methods do not cover property: {:?}", p)));
-      }
-    }
-    Ok(())
-  }
-  pub fn execute_step(&self, ctx: &StepContext, input: Step2Input) -> Result<crate::step::StepInfo, WorkflowError> {
-    let prev = ctx.get_typed_output_by_type::<Step1Payload>()?
-                  .ok_or_else(|| WorkflowError::Validation("Step1Payload not found".into()))?;
-
-    let family_id = prev.family_uuid.ok_or_else(|| WorkflowError::Validation("No family UUID in Step1Payload".into()))?;
-
-    let family = ctx.domain_repo
-                    .get_family(&family_id)?
-                    .ok_or_else(|| WorkflowError::Validation(format!("Family {} not found", family_id)))?;
-
-    self.validate_method_configuration(&input)?;
-
-    let molecules = family.molecules();
-    let mol_count = molecules.len();
-    let mut calculated_count = 0;
-    let mut all_properties_full: AllPropertiesFull = HashMap::with_capacity(mol_count);
-    let mut selected_properties: SelectedProperties = HashMap::with_capacity(mol_count);
-    let mut saved_property_ids = Vec::new();
-
-    for molecule in molecules {
-      let properties = self.calculate_molecule_properties(molecule, &input, &family_id)?;
-      calculated_count += properties.len();
-
-      let mut generated_entries: Vec<GeneratedPropertyEntry> = Vec::new();
-      for prop in properties {
-        let value = prop.value.as_f64().unwrap_or(0.0);
-        let method = prop.metadata.get("method").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-
-        let entry = GeneratedPropertyEntry { id: prop.id,
-                                             property_type: prop.property_type.clone(),
-                                             value,
-                                             method: method.clone(),
-                                             metadata: prop.metadata.clone() };
-
-        // Persistir la propiedad en el repositorio de dominio
-        ctx.domain_repo.save_molecular_property(prop)?;
-        saved_property_ids.push(entry.id.to_string());
-        generated_entries.push(entry);
-      }
-
-      let smiles = molecule.smiles().to_string();
-      all_properties_full.insert(smiles.clone(), generated_entries.clone());
-
-      let chosen_map = self.select_preferred_properties(generated_entries, &input.preferred_methods);
-      selected_properties.insert(smiles, chosen_map);
-    }
-
-    let payload = Step2Payload { family_id,
-                                 calculated_properties: calculated_count,
-                                 step_result: format!("Calculadas {} propiedades para {} moléculas",
-                                                      calculated_count, mol_count),
-                                 all_properties: all_properties_full,
-                                 selected_properties };
-
-    let metadata = Step2Metadata { status: "completed".to_string(),
-                                   parameters: Step2Params { input },
-                                   domain_refs: vec![family_id.to_string()],
-                                   saved_property_ids };
-
-    Ok(crate::step::StepInfo { payload: serde_json::to_value(&payload)?, metadata: serde_json::to_value(&metadata)? })
-  }
-
-  fn validate_method_configuration(&self, input: &Step2Input) -> Result<(), WorkflowError> {
-    let mut covered = std::collections::HashSet::new();
-
-    // Validar mapeo explícito
     if let Some(map) = &input.method_property_map {
       for (&prop, &method) in map {
         if !method.can_generate(prop) {
-          return Err(WorkflowError::Validation(format!("Método {:?} no puede generar propiedad {:?}", method, prop)));
+          return Err(WorkflowError::Validation(format!("Método {:?} no puede generar la propiedad {:?}", method, prop)));
         }
         covered.insert(prop);
       }
     }
 
-    // Cubrir propiedades faltantes con métodos preferidos
-    for &prop in REQUIRED_PROPERTIES.iter() {
+    for &prop in &REQUIRED_PROPERTIES {
       if covered.contains(&prop) {
         continue;
       }
-
       let ok = input.preferred_methods.iter().any(|&m| m.can_generate(prop));
       if !ok {
-        return Err(WorkflowError::Validation(format!("Ningún método puede generar {:?}", prop)));
+        return Err(WorkflowError::Validation(format!("Ningún método preferido puede generar {:?}", prop)));
       }
       covered.insert(prop);
     }
@@ -343,97 +188,208 @@ impl ADMETSAPropertiesStep2 {
     Ok(())
   }
 
-  fn calculate_molecule_properties(&self,
-                                   molecule: &chem_domain::Molecule,
-                                   input: &Step2Input,
-                                   family_id: &Uuid)
-                                   -> Result<Vec<OwnedMolecularProperty>, WorkflowError> {
-    let smiles_str = molecule.smiles().to_string();
+  /// Obtiene el método a usar para una propiedad (mapa explícito > preferencia
+  /// > Manual por default)
+  fn choose_method(&self, prop: ADMETSAProperty, input: &Step2Input) -> ADMETSAMethod {
+    if let Some(map) = &input.method_property_map {
+      if let Some(&m) = map.get(&prop) {
+        return m;
+      }
+    }
+    input.preferred_methods.iter().copied().find(|&m| m.can_generate(prop)).unwrap_or(ADMETSAMethod::Manual)
+  }
+
+  /// Intenta obtener valor manual si existe; la clave interna en ManualValues
+  /// se hace con `format!("{:?}", prop)`.
+  fn manual_value_for(&self, smiles: &str, prop: ADMETSAProperty, input: &Step2Input) -> Option<f64> {
+    let prop_key = format!("{:?}", prop);
+    input.manual_values.as_ref().and_then(|mv| mv.get(smiles)).and_then(|pv| pv.get(&prop_key).copied())
+  }
+
+  /// Calcula (mock) los OwnedMolecularProperty para una molécula.
+  fn compute_properties_for_molecule(&self,
+                                     molecule: &Molecule,
+                                     family_id: &Uuid,
+                                     input: &Step2Input)
+                                     -> Result<Vec<OwnedMolecularProperty>, WorkflowError> {
+    let smiles = molecule.smiles().to_string();
     let inchikey = molecule.inchikey().to_string();
+    let mut props = Vec::with_capacity(REQUIRED_PROPERTIES.len());
 
-    REQUIRED_PROPERTIES.iter()
-                       .map(|&prop| {
-                         let method = self.get_property_method(prop, input);
-                         let value = self.get_property_value(prop, &smiles_str, molecule, input, method)?;
+    for &prop in &REQUIRED_PROPERTIES {
+      let method = self.choose_method(prop, input);
 
-                         Ok(OwnedMolecularProperty { id: Uuid::new_v4(),
-                                                     molecule_inchikey: inchikey.clone(),
-                                                     property_type: format!("{:?}", prop),
-                                                     value: serde_json::json!(value),
-                                                     quality: Some("calculated".to_string()),
-                                                     preferred: true,
-                                                     value_hash: format!("{:?}_{}", prop, value),
-                                                     metadata: serde_json::json!({
-                                                         "method": format!("{:?}", method),
-                                                         "family_id": family_id.to_string(),
-                                                         "step": "ADMETSAPropertiesStep2"
-                                                     }) })
-                       })
-                       .collect()
-  }
+      // Prioridad: manual_values override
+      if let Some(v) = self.manual_value_for(&smiles, prop, input) {
+        let metadata = serde_json::json!({
+            "method": "manual",
+            "family_id": family_id.to_string(),
+            "step": "ADMETSAPropertiesStep2"
+        });
+        props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
+                                            molecule_inchikey: inchikey.clone(),
+                                            property_type: format!("{:?}", prop),
+                                            value: serde_json::json!(v),
+                                            quality: Some("manual".to_string()),
+                                            preferred: true,
+                                            value_hash: format!("{:?}_{}", prop, v),
+                                            metadata });
+        continue;
+      }
 
-  fn get_property_method(&self, prop: ADMETSAProperty, input: &Step2Input) -> ADMETSAMethod {
-    input.method_property_map
-         .as_ref()
-         .and_then(|map| map.get(&prop).copied())
-         .or_else(|| input.preferred_methods.iter().find(|&&m| m.can_generate(prop)).copied())
-         .unwrap_or(ADMETSAMethod::Manual)
-  }
-
-  fn get_property_value(&self,
-                        prop: ADMETSAProperty,
-                        smiles: &str,
-                        _molecule: &chem_domain::Molecule,
-                        input: &Step2Input,
-                        method: ADMETSAMethod)
-                        -> Result<f64, WorkflowError> {
-    // 1. Intentar valor manual primero
-    if let Some(manual_vals) = &input.manual_values {
-      if let Some(mol_props) = manual_vals.get(smiles) {
-        if let Some(&value) = mol_props.get(&prop) {
-          return Ok(value);
+      // Si método es Manual y no hay valor, intentamos fallback a un método
+      // preferido capaz de generar la propiedad. Si no hay ninguno, error.
+      if method == ADMETSAMethod::Manual {
+        if let Some(m_pref) =
+          input.preferred_methods.iter().copied().find(|&m| m != ADMETSAMethod::Manual && m.can_generate(prop))
+        {
+          let v = m_pref.calculate_mock_value(prop);
+          let metadata = serde_json::json!({
+              "method": format!("{:?}", m_pref),
+              "family_id": family_id.to_string(),
+              "step": "ADMETSAPropertiesStep2"
+          });
+          props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
+                                              molecule_inchikey: inchikey.clone(),
+                                              property_type: format!("{:?}", prop),
+                                              value: serde_json::json!(v),
+                                              quality: Some("calculated".to_string()),
+                                              preferred: true,
+                                              value_hash: format!("{:?}_{}", prop, v),
+                                              metadata });
+          continue;
+        } else {
+          return Err(WorkflowError::Validation(format!("Método Manual asignado para {:?} pero no existe valor manual \
+                                                        para SMILES {}",
+                                                       prop, smiles)));
         }
+      }
+
+      // Asegurar que el método pueda generar la propiedad
+      if !method.can_generate(prop) {
+        return Err(WorkflowError::Validation(format!("Método {:?} no puede generar la propiedad {:?}", method, prop)));
+      }
+
+      let v = method.calculate_mock_value(prop);
+      let metadata = serde_json::json!({
+          "method": format!("{:?}", method),
+          "family_id": family_id.to_string(),
+          "step": "ADMETSAPropertiesStep2"
+      });
+
+      props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
+                                          molecule_inchikey: inchikey.clone(),
+                                          property_type: format!("{:?}", prop),
+                                          value: serde_json::json!(v),
+                                          quality: Some("calculated".to_string()),
+                                          preferred: true,
+                                          value_hash: format!("{:?}_{}", prop, v),
+                                          metadata });
+    }
+
+    Ok(props)
+  }
+
+  /// Selecciona la mejor entrada por propiedad según `preferred_methods` (si no
+  /// hay match, toma la primera).
+  fn select_preferred(&self,
+                      generated: &[GeneratedPropertyEntry],
+                      preferred_methods: &[ADMETSAMethod])
+                      -> HashMap<String, SelectedPropertyEntry> {
+    let mut by_prop: HashMap<String, Vec<&GeneratedPropertyEntry>> = HashMap::new();
+    for e in generated {
+      by_prop.entry(e.property_type.clone()).or_default().push(e);
+    }
+
+    let pref_strs: Vec<String> = preferred_methods.iter().map(|m| format!("{:?}", m)).collect();
+    let mut chosen = HashMap::with_capacity(by_prop.len());
+
+    for (prop_type, group) in by_prop {
+      if let Some(best) = group.iter().find(|&&g| pref_strs.contains(&g.method)).cloned() {
+        chosen.insert(prop_type.clone(),
+                      SelectedPropertyEntry { id: best.id,
+                                              property_type: best.property_type.clone(),
+                                              value: best.value,
+                                              method: best.method.clone() });
+      } else if let Some(first) = group.first() {
+        chosen.insert(prop_type.clone(),
+                      SelectedPropertyEntry { id: first.id,
+                                              property_type: first.property_type.clone(),
+                                              value: first.value,
+                                              method: first.method.clone() });
       }
     }
 
-    // 2. Validar método
-    if !method.can_generate(prop) && method != ADMETSAMethod::Manual {
-      return Err(WorkflowError::Validation(format!("Método {:?} no puede generar {:?}", method, prop)));
-    }
-
-    // 3. Calcular valor
-    Ok(match method {
-         ADMETSAMethod::Manual => 0.0, // Placeholder para valores manuales no proporcionados
-         _ => method.calculate_mock_value(prop),
-       })
+    chosen
   }
 
-  fn select_preferred_properties(&self,
-                                 entries: Vec<GeneratedPropertyEntry>,
-                                 preferred_methods: &[ADMETSAMethod])
-                                 -> HashMap<String, SelectedPropertyEntry> {
-    let mut grouped: HashMap<String, Vec<GeneratedPropertyEntry>> = HashMap::new();
+  /// Ejecuta el step: lee Step1Payload, recorre moléculas, calcula y persiste
+  /// propiedades.
+  pub fn execute_step(&self, ctx: &StepContext, input: Step2Input) -> Result<crate::step::StepInfo, WorkflowError> {
+    // Obtener payload de step1 (familia)
+    let prev = ctx.get_typed_output_by_type::<Step1Payload>()?
+                  .ok_or_else(|| WorkflowError::Validation("Step1Payload not found".into()))?;
+    let family_id = prev.family_uuid;
 
-    for entry in entries {
-      grouped.entry(entry.property_type.clone()).or_default().push(entry);
+    // Obtener familia
+    let family = ctx.domain_repo
+                    .get_family(&family_id)?
+                    .ok_or_else(|| WorkflowError::Validation(format!("Family {} not found", family_id)))?;
+
+    // Validar configuración de métodos
+    self.validate_methods_cover(&input)?;
+
+    let molecules: Vec<&Molecule> = family.molecules().iter().collect();
+    let mol_count = molecules.len();
+
+    let mut all_properties: AllPropertiesFull = HashMap::with_capacity(mol_count);
+    let mut selected_properties: SelectedProperties = HashMap::with_capacity(mol_count);
+    let mut saved_ids: Vec<String> = Vec::with_capacity(mol_count * REQUIRED_PROPERTIES.len());
+    let mut domain_refs: Vec<String> = vec![family_id.to_string()];
+
+    for mol in molecules {
+      let props = self.compute_properties_for_molecule(mol, &family_id, &input)?;
+      // convertir a GeneratedPropertyEntry y persistir cada OwnedMolecularProperty en
+      // domain repo
+      let mut generated_entries: Vec<GeneratedPropertyEntry> = Vec::with_capacity(props.len());
+      for p in props.into_iter() {
+        // persistir (clonar p porque save_molecular_property consume
+        // OwnedMolecularProperty)
+        ctx.domain_repo.save_molecular_property(p.clone())?;
+        saved_ids.push(p.id.to_string());
+
+        // construir entry para el retorno
+        let v = p.value.as_f64().unwrap_or(0.0);
+        let method = p.metadata.get("method").and_then(|m| m.as_str()).unwrap_or("unknown").to_string();
+        generated_entries.push(GeneratedPropertyEntry { id: p.id,
+                                                        property_type: p.property_type,
+                                                        value: v,
+                                                        method: method.clone(),
+                                                        metadata: p.metadata });
+      }
+
+      let smiles = mol.smiles().to_string();
+      let inchikey = mol.inchikey().to_string();
+      domain_refs.push(inchikey.clone());
+      let chosen = self.select_preferred(&generated_entries, &input.preferred_methods);
+      all_properties.insert(smiles.clone(), generated_entries);
+      selected_properties.insert(smiles, chosen);
     }
 
-    grouped.into_iter()
-           .filter_map(|(prop_type, group)| {
-             let chosen = preferred_methods.iter()
-                                           .find_map(|pm| {
-                                             let pm_str = format!("{:?}", pm);
-                                             group.iter().find(|g| g.method == pm_str).cloned()
-                                           })
-                                           .or_else(|| group.into_iter().next())?;
+    let calc_count = saved_ids.len();
+    let payload = Step2Payload { family_id,
+                                 calculated_properties: calc_count,
+                                 step_result: format!("Calculadas {} propiedades para {} moléculas",
+                                                      calc_count, mol_count),
+                                 all_properties,
+                                 selected_properties };
 
-             Some((prop_type.clone(),
-                   SelectedPropertyEntry { id: chosen.id,
-                                           property_type: chosen.property_type,
-                                           value: chosen.value,
-                                           method: chosen.method }))
-           })
-           .collect()
+    let metadata = Step2Metadata { status: "completed".to_string(),
+                                   parameters: Step2Params { input },
+                                   domain_refs,
+                                   saved_property_ids: saved_ids };
+
+    Ok(crate::step::StepInfo { payload: serde_json::to_value(&payload)?, metadata: serde_json::to_value(&metadata)? })
   }
 }
 

@@ -1,7 +1,8 @@
+// error.rs
 use chem_providers::EngineError;
 use thiserror::Error;
-/// Error personalizado del dominio para la aplicación química
-#[derive(Debug, Error)]
+
+#[derive(Debug, Error, Clone)]
 pub enum DomainError {
   #[error("Error de validación: {0}")]
   ValidationError(String),
@@ -10,15 +11,15 @@ pub enum DomainError {
   #[error("Error de serialización: {0}")]
   SerializationError(String),
 }
-// Implementación de conversión desde EngineError a DomainError
+
 impl From<EngineError> for DomainError {
   fn from(e: EngineError) -> Self {
-    DomainError::ExternalError(e.to_string())
+    Self::ExternalError(e.to_string())
   }
 }
-// Implementación de conversión desde serde_json::Error a DomainError
+
 impl From<serde_json::Error> for DomainError {
   fn from(e: serde_json::Error) -> Self {
-    DomainError::SerializationError(e.to_string())
+    Self::SerializationError(e.to_string())
   }
 }
