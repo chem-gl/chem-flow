@@ -320,7 +320,8 @@ pub trait ChemicalFlowEngine: Send + Sync {
         if let Ok(state_b64) = String::from_utf8(bytes) {
           if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(state_b64.as_bytes()) {
             let snapshot: JsonValue = serde_json::from_slice(&decoded)?;
-            self.apply_snapshot(&snapshot).map_err(|e| WorkflowError::Persistence(format!("apply_snapshot error: {}", e)))?;
+            self.apply_snapshot(&snapshot)
+                .map_err(|e| WorkflowError::Persistence(format!("apply_snapshot error: {}", e)))?;
           }
         }
       }

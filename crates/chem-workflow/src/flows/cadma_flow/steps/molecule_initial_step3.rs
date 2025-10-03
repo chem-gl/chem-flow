@@ -58,7 +58,7 @@ impl MoleculeInitialStep3 {
     let mut domain_refs = Vec::new();
 
     for smiles in &smiles_list {
-      let molecule = Molecule::from_smiles(smiles).map_err(|e| WorkflowError::Domain(e))?;
+      let molecule = Molecule::from_smiles(smiles).map_err(WorkflowError::Domain)?;
       let inchikey = ctx.domain_repo.save_molecule(molecule.clone())?;
       generated_inchikeys.push(inchikey.clone());
       domain_refs.push(inchikey);

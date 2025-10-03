@@ -33,7 +33,8 @@ mod tests {
                        inchikey: "".to_string(),
                        num_atoms: 0,
                        mol_weight: 0.0,
-                       mol_formula: "".to_string() };
+                       mol_formula: "".to_string(),
+                       structure: None };
     assert_eq!(m.smiles, "");
     assert_eq!(m.num_atoms, 0);
   }

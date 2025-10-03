@@ -55,14 +55,22 @@ impl Molecule {
     let engine = ENGINE.as_ref().map_err(|e| e.clone())?;
     let chem_molecule =
       engine.get_molecule(smiles).map_err(|e| DomainError::ExternalError(format!("Error al procesar SMILES: {}", e)))?;
-    Self::new(&chem_molecule.inchikey,
-              &chem_molecule.smiles,
-              &chem_molecule.inchi,
-              serde_json::json!({
-                  "source": "created_from_smiles",
-                  "original_smiles": smiles,
-                  "generation_timestamp": Utc::now().to_rfc3339(),
-              }))
+
+    // Base metadata
+    let mut meta = serde_json::json!({
+      "source": "created_from_smiles",
+      "original_smiles": smiles,
+      "generation_timestamp": Utc::now().to_rfc3339(),
+    });
+    // If provider returned structure, insert it into metadata so persistence can
+    // save it.
+    if let Some(structure) = chem_molecule.structure {
+      // serialize the structure into a JSON value and attach under key "structure"
+      let struct_val = serde_json::to_value(&structure)?;
+      meta["structure"] = struct_val;
+    }
+
+    Self::new(&chem_molecule.inchikey, &chem_molecule.smiles, &chem_molecule.inchi, meta)
   }
 
   pub fn smiles(&self) -> &str {

@@ -122,6 +122,7 @@ struct MoleculeRow {
   pub smiles: String,
   pub inchi: String,
   pub metadata: String,
+  pub structure: Option<String>,
 }
 
 #[derive(Debug, Queryable, Insertable, AsChangeset)]
@@ -197,10 +198,14 @@ impl DieselDomainRepository {
 
       let mut mols = Vec::with_capacity(molecule_rows.len());
       for mr in molecule_rows {
-        let mol = Molecule::from_parts(&mr.inchikey,
-                                       &mr.smiles,
-                                       &mr.inchi,
-                                       serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({})))?;
+        // Merge structure JSON into metadata under key "structure" if present
+        let mut metadata_val = serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({}));
+        if let Some(s) = mr.structure.as_ref() {
+          if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
+            metadata_val["structure"] = struct_json;
+          }
+        }
+        let mol = Molecule::from_parts(&mr.inchikey, &mr.smiles, &mr.inchi, metadata_val)?;
         mols.push(mol);
       }
 
@@ -253,7 +258,8 @@ impl DieselDomainRepository {
       let mr = MoleculeRow { inchikey: m.inchikey().to_string(),
                              smiles: m.smiles().to_string(),
                              inchi: m.inchi().to_string(),
-                             metadata: m.metadata().to_string() };
+                             metadata: m.metadata().to_string(),
+                             structure: m.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
       #[cfg(feature = "pg")]
       {
         let _ = diesel::insert_into(schema::molecules::table).values(&mr)
@@ -264,14 +270,14 @@ impl DieselDomainRepository {
       #[cfg(not(feature = "pg"))]
       {
         // SQLite: ignore errors or use INSERT OR IGNORE
-        let _ = diesel::sql_query(
-                    "INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata) VALUES (?, ?, ?, ?)",
-                )
-                .bind::<diesel::sql_types::Text, _>(mr.inchikey)
-                .bind::<diesel::sql_types::Text, _>(mr.smiles)
-                .bind::<diesel::sql_types::Text, _>(mr.inchi)
-                .bind::<diesel::sql_types::Text, _>(mr.metadata)
-                .execute(conn);
+        let _ =
+          diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, \
+                             ?, ?, ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey)
+                                       .bind::<diesel::sql_types::Text, _>(mr.smiles)
+                                       .bind::<diesel::sql_types::Text, _>(mr.inchi)
+                                       .bind::<diesel::sql_types::Text, _>(mr.metadata)
+                                       .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
+                                       .execute(conn);
       }
     }
 
@@ -311,7 +317,8 @@ impl DomainRepository for DieselDomainRepository {
     let mr = MoleculeRow { inchikey: molecule.inchikey().to_string(),
                            smiles: molecule.smiles().to_string(),
                            inchi: molecule.inchi().to_string(),
-                           metadata: molecule.metadata().to_string() };
+                           metadata: molecule.metadata().to_string(),
+                           structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
 
     #[cfg(feature = "pg")]
     {
@@ -322,14 +329,14 @@ impl DomainRepository for DieselDomainRepository {
     }
     #[cfg(not(feature = "pg"))]
     {
-      let res = diesel::sql_query(
-                "INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata) VALUES (?, ?, ?, ?)",
-            )
-            .bind::<diesel::sql_types::Text, _>(mr.inchikey.clone())
-            .bind::<diesel::sql_types::Text, _>(mr.smiles)
-            .bind::<diesel::sql_types::Text, _>(mr.inchi)
-            .bind::<diesel::sql_types::Text, _>(mr.metadata)
-            .execute(&mut conn);
+      let res =
+        diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, \
+                           ?, ?, ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey.clone())
+                                     .bind::<diesel::sql_types::Text, _>(mr.smiles)
+                                     .bind::<diesel::sql_types::Text, _>(mr.inchi)
+                                     .bind::<diesel::sql_types::Text, _>(mr.metadata)
+                                     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure.clone())
+                                     .execute(&mut conn);
       map_db_err(res)?;
     }
 
@@ -343,10 +350,13 @@ impl DomainRepository for DieselDomainRepository {
                                       .optional()
                                       .map_err(|e| DomainError::ExternalError(format!("db: {}", e)))?;
     if let Some(r) = opt {
-      let mol = Molecule::from_parts(&r.inchikey,
-                                     &r.smiles,
-                                     &r.inchi,
-                                     serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})))?;
+      let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
+      if let Some(s) = r.structure.as_ref() {
+        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
+          metadata_val["structure"] = struct_json;
+        }
+      }
+      let mol = Molecule::from_parts(&r.inchikey, &r.smiles, &r.inchi, metadata_val)?;
       Ok(Some(mol))
     } else {
       Ok(None)
@@ -359,10 +369,13 @@ impl DomainRepository for DieselDomainRepository {
                                        .map_err(|e| DomainError::ExternalError(format!("db: {}", e)))?;
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-      let mol = Molecule::from_parts(&r.inchikey,
-                                     &r.smiles,
-                                     &r.inchi,
-                                     serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})))?;
+      let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
+      if let Some(s) = r.structure.as_ref() {
+        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
+          metadata_val["structure"] = struct_json;
+        }
+      }
+      let mol = Molecule::from_parts(&r.inchikey, &r.smiles, &r.inchi, metadata_val)?;
       out.push(mol);
     }
     Ok(out)
@@ -403,10 +416,13 @@ impl DomainRepository for DieselDomainRepository {
     // Map molecules by inchikey
     let mut molecules_by_inchikey: HashMap<String, Molecule> = HashMap::new();
     for mr in molecule_rows {
-      let mol = Molecule::from_parts(&mr.inchikey,
-                                     &mr.smiles,
-                                     &mr.inchi,
-                                     serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({})))?;
+      let mut metadata_val = serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({}));
+      if let Some(s) = mr.structure.as_ref() {
+        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
+          metadata_val["structure"] = struct_json;
+        }
+      }
+      let mol = Molecule::from_parts(&mr.inchikey, &mr.smiles, &mr.inchi, metadata_val)?;
       molecules_by_inchikey.insert(mr.inchikey, mol);
     }
 
@@ -580,7 +596,8 @@ impl DomainRepository for DieselDomainRepository {
           let mr = MoleculeRow { inchikey: molecule.inchikey().to_string(),
                                  smiles: molecule.smiles().to_string(),
                                  inchi: molecule.inchi().to_string(),
-                                 metadata: molecule.metadata().to_string() };
+                                 metadata: molecule.metadata().to_string(),
+                                 structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
           #[cfg(feature = "pg")]
           {
             map_db_err(
@@ -593,11 +610,12 @@ impl DomainRepository for DieselDomainRepository {
           }
           #[cfg(not(feature = "pg"))]
           {
-            map_db_err(diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata) VALUES (?, \
-                                          ?, ?, ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey)
+            map_db_err(diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, ?, ?, ?)")
+                                                    .bind::<diesel::sql_types::Text, _>(mr.inchikey)
                                                     .bind::<diesel::sql_types::Text, _>(mr.smiles)
                                                     .bind::<diesel::sql_types::Text, _>(mr.inchi)
                                                     .bind::<diesel::sql_types::Text, _>(mr.metadata)
+                                                    .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
                                                     .execute(conn)).map_err(|_| diesel::result::Error::RollbackTransaction)?;
           }
 

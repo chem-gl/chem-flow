@@ -256,12 +256,13 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   if preferred.contains(&ADMETSAMethod::Manual) {
     // Obtener familia y moléculas
     let family = engine.domain_repo
-                      .get_family(&step1_payload.as_ref().unwrap().family_uuid)?
-                      .ok_or_else(|| "Familia no encontrada".to_string())?;
+                       .get_family(&step1_payload.as_ref().unwrap().family_uuid)?
+                       .ok_or_else(|| "Familia no encontrada".to_string())?;
     let molecules: Vec<&Molecule> = family.molecules().iter().collect();
     let mut mv = ManualValues::new();
     println!("Ingresando valores manuales para {} moléculas.", molecules.len());
-    println!("Propiedades requeridas: {:?}", REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", "));
+    println!("Propiedades requeridas: {:?}",
+             REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", "));
     for mol in &molecules {
       let smiles = mol.smiles();
       loop {
@@ -280,7 +281,8 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
             continue;
           }
           // Verificar que no haya extras (opcional, pero para ser estricto)
-          let valid_keys: std::collections::HashSet<String> = REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect();
+          let valid_keys: std::collections::HashSet<String> =
+            REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect();
           let extra: Vec<String> = props.keys().filter(|k| !valid_keys.contains(*k)).cloned().collect();
           if !extra.is_empty() {
             println!("Propiedades extra no válidas: {}", extra.join(", "));
@@ -358,25 +360,26 @@ fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
 
 /// Crea una rama desde un cursor especificado por el usuario
 fn create_branch_from_engine(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
-    let flow_repo = engine.flow_repo();
-    let flow_id = engine.id();
-    let meta = flow_repo.get_flow_meta(&flow_id)?;
-    let current_cursor = meta.current_cursor;
-    println!("Cursor actual: {}", current_cursor);
-    let cursor_str = prompt("Ingresa el cursor desde donde crear la rama (debe ser <= {}): ")?;
-    let branch_cursor: i64 = cursor_str.trim().parse().map_err(|_| "Cursor inválido, debe ser un número entero")?;
-    if branch_cursor > current_cursor {
-        return Err("El cursor especificado es mayor que el cursor actual, no se puede ramificar desde un cursor no ejecutado".into());
-    }
-    if branch_cursor < 0 {
-        return Err("El cursor debe ser >= 0".into());
-    }
-    let branch_name = format!("branch_from_{}", branch_cursor);
-    let metadata = json!({"name": branch_name});
-    let branch_id = flow_repo.create_branch(&flow_id, branch_cursor, metadata)?;
-    println!("Rama creada: {} desde cursor {}", branch_id, branch_cursor);
-    Ok(())
-}/// Carga un flow existente seleccionando desde el repo
+  let flow_repo = engine.flow_repo();
+  let flow_id = engine.id();
+  let meta = flow_repo.get_flow_meta(&flow_id)?;
+  let current_cursor = meta.current_cursor;
+  println!("Cursor actual: {}", current_cursor);
+  let cursor_str = prompt("Ingresa el cursor desde donde crear la rama (debe ser <= {}): ")?;
+  let branch_cursor: i64 = cursor_str.trim().parse().map_err(|_| "Cursor inválido, debe ser un número entero")?;
+  if branch_cursor > current_cursor {
+    return Err("El cursor especificado es mayor que el cursor actual, no se puede ramificar desde un cursor no ejecutado".into());
+  }
+  if branch_cursor < 0 {
+    return Err("El cursor debe ser >= 0".into());
+  }
+  let branch_name = format!("branch_from_{}", branch_cursor);
+  let metadata = json!({"name": branch_name});
+  let branch_id = flow_repo.create_branch(&flow_id, branch_cursor, metadata)?;
+  println!("Rama creada: {} desde cursor {}", branch_id, branch_cursor);
+  Ok(())
+}
+/// Carga un flow existente seleccionando desde el repo
 fn load_flow_interactive() -> Result<Option<CadmaFlow>, Box<dyn Error>> {
   let repo = new_flow_from_env()?;
   let repo_arc = Arc::new(repo);
@@ -393,27 +396,24 @@ fn load_flow_interactive() -> Result<Option<CadmaFlow>, Box<dyn Error>> {
         let mut engine = CadmaFlow::construct_with_repos(flow_id, repo_arc.clone(), Arc::new(domain_repo));
         // Intentar cargar y aplicar el último snapshot
         match repo_arc.load_latest_snapshot(&flow_id) {
-          Ok(Some(snapshot_meta)) => {
-            match repo_arc.load_snapshot(&snapshot_meta.id) {
-              Ok((data, _)) => {
-                match serde_json::from_slice(&data) {
-                  Ok(snapshot_json) => {
-                    if let Err(e2) = engine.apply_snapshot(&snapshot_json) {
-                      println!("Error aplicando snapshot: {}, continuando sin él", e2);
-                    } else {
-                      println!("Snapshot aplicado exitosamente");
-                    }
-                  }
-                  Err(e2) => println!("Error parseando snapshot JSON: {}, continuando sin él", e2),
+          Ok(Some(snapshot_meta)) => match repo_arc.load_snapshot(&snapshot_meta.id) {
+            Ok((data, _)) => match serde_json::from_slice(&data) {
+              Ok(snapshot_json) => {
+                if let Err(e2) = engine.apply_snapshot(&snapshot_json) {
+                  println!("Error aplicando snapshot: {}, continuando sin él", e2);
+                } else {
+                  println!("Snapshot aplicado exitosamente");
                 }
               }
-              Err(e2) => println!("Error cargando datos del snapshot: {}, continuando sin él", e2),
-            }
-          }
+              Err(e2) => println!("Error parseando snapshot JSON: {}, continuando sin él", e2),
+            },
+            Err(e2) => println!("Error cargando datos del snapshot: {}, continuando sin él", e2),
+          },
           Ok(None) => println!("No hay snapshot disponible, cargando desde registros"),
           Err(e2) => println!("Error obteniendo snapshot: {}, continuando sin él", e2),
         }
-        // Rehidratar desde registros de flow_data si es necesario (el engine puede hacerlo internamente)
+        // Rehidratar desde registros de flow_data si es necesario (el engine puede
+        // hacerlo internamente)
         println!("Flow cargado manualmente: {} (current_step={})", flow_id, engine.current_step());
         return Ok(Some(engine));
       }
@@ -444,81 +444,6 @@ fn list_families() -> Result<(), Box<dyn Error>> {
              f.id());
   }
   Ok(())
-}
-
-/// Crear una molécula y guardarla en el repositorio de dominio
-fn create_molecule_interactive() -> Result<(), Box<dyn Error>> {
-  let repo = new_domain_from_env()?;
-  let smiles = prompt("SMILES de la molécula: ")?;
-  if smiles.trim().is_empty() {
-    println!("SMILES vacío; abortando.");
-    return Ok(());
-  }
-  match Molecule::from_smiles(&smiles) {
-    Ok(m) => match repo.save_molecule(m.clone()) {
-      Ok(inchikey) => {
-        println!("Molécula guardada con InChIKey: {}", inchikey);
-        Ok(())
-      }
-      Err(e) => Err(Box::new(e)),
-    },
-    Err(e) => {
-      println!("Error creando molécula desde SMILES: {}", e);
-      Ok(())
-    }
-  }
-}
-
-/// Crear una familia a partir de moléculas existentes en el repo
-fn create_family_from_molecules_interactive() -> Result<(), Box<dyn Error>> {
-  let repo = new_domain_from_env()?;
-  let mols = repo.list_molecules()?;
-  if mols.is_empty() {
-    println!("No hay moléculas en el repositorio. Crea primero algunas moléculas.");
-    return Ok(());
-  }
-  println!("Moléculas disponibles:");
-  for (i, m) in mols.iter().enumerate() {
-    println!("  {}: {} - {}", i + 1, m.smiles(), m.inchikey());
-  }
-  let raw = prompt("Indices de moléculas para la familia (coma separados, e.g. 1,3): ")?;
-  if raw.trim().is_empty() {
-    println!("No se seleccionaron moléculas; abortando.");
-    return Ok(());
-  }
-  let mut selected: Vec<Molecule> = Vec::new();
-  for tok in raw.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-    if let Ok(n) = tok.parse::<usize>() {
-      if n >= 1 && n <= mols.len() {
-        selected.push(mols[n - 1].clone());
-      } else {
-        println!("Índice fuera de rango: {} (ignorando)", n);
-      }
-    } else {
-      println!("Token inválido: {} (ignorando)", tok);
-    }
-  }
-  if selected.is_empty() {
-    println!("No hay moléculas válidas seleccionadas; abortando.");
-    return Ok(());
-  }
-  let name = prompt("Nombre de la familia (opcional): ")?;
-  let desc = prompt("Descripción (opcional): ")?;
-  let provenance = json!({"created_by": "cadma_example", "name": name.clone(), "description": desc.clone()});
-  let mut family = MoleculeFamily::new(selected, provenance)?;
-  if !name.trim().is_empty() {
-    family = family.with_name(name);
-  }
-  if !desc.trim().is_empty() {
-    family = family.with_description(desc);
-  }
-  match repo.save_family(family) {
-    Ok(id) => {
-      println!("Familia creada y guardada con id: {}", id);
-      Ok(())
-    }
-    Err(e) => Err(Box::new(e)),
-  }
 }
 
 fn save_snapshot(engine: &CadmaFlow) {
@@ -628,6 +553,63 @@ fn main() -> Result<(), Box<dyn Error>> {
       "9" => {
         if let Err(e) = list_families() {
           println!("Error listando familias: {}", e);
+        }
+      }
+      "a" => {
+        // Crear molécula (persistir en dominio)
+        let repo = match new_domain_from_env() {
+          Ok(r) => r,
+          Err(e) => {
+            println!("No se pudo inicializar domain repo: {}", e);
+            continue;
+          }
+        };
+        let smiles = prompt("SMILES de la nueva molécula: ")?;
+        if smiles.trim().is_empty() {
+          println!("SMILES vacío; abortando.");
+          continue;
+        }
+        match Molecule::from_smiles(&smiles) {
+          Ok(m) => match repo.save_molecule(m.clone()) {
+            Ok(key) => println!("Molécula creada y guardada con inchikey: {}", key),
+            Err(e) => println!("Error guardando molécula: {}", e),
+          },
+          Err(e) => println!("Error creando molécula desde SMILES: {}", e),
+        }
+      }
+      "b" => {
+        // Crear familia desde moléculas existentes en dominio
+        let repo = match new_domain_from_env() {
+          Ok(r) => r,
+          Err(e) => {
+            println!("No se pudo inicializar domain repo: {}", e);
+            continue;
+          }
+        };
+        let keys = prompt("Ingresa inchikeys separados por coma: ")?;
+        let mut mols = Vec::new();
+        for k in keys.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+          match repo.get_molecule(k) {
+            Ok(Some(m)) => mols.push(m),
+            Ok(None) => println!("No se encontró molécula con inchikey: {}", k),
+            Err(e) => println!("Error consultando inchikey {}: {}", k, e),
+          }
+        }
+        if mols.is_empty() {
+          println!("No se encontraron moléculas válidas; abortando creación de familia.");
+          continue;
+        }
+        let name = prompt("Nombre de la nueva familia (opcional): ")?;
+        let fam = match MoleculeFamily::new(mols, serde_json::json!({})) {
+          Ok(f) => f,
+          Err(e) => {
+            println!("Error construyendo familia: {}", e);
+            continue;
+          }
+        };
+        match repo.save_family(fam) {
+          Ok(id) => println!("Familia creada con id: {}", id),
+          Err(e) => println!("Error guardando familia: {}", e),
         }
       }
       "0" => {

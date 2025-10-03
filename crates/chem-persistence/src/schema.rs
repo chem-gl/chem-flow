@@ -44,6 +44,7 @@ diesel::table! {
         smiles -> Text,
         inchi -> Text,
         metadata -> Text,
+        structure -> Nullable<Text>,
     }
 }
 diesel::table! {

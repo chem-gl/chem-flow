@@ -1,7 +1,7 @@
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::CString;
 use std::sync::OnceLock;
 static RDKIT_MODULE: OnceLock<Py<PyModule>> = OnceLock::new();
@@ -21,7 +21,7 @@ fn get_module(py: Python<'_>) -> PyResult<Py<PyModule>> {
         )
                                                        })
 }
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// Representa una molécula obtenida desde RDKit con propiedades básicas
 pub struct Molecule {
   /// Representación SMILES de la molécula
@@ -36,6 +36,33 @@ pub struct Molecule {
   pub mol_weight: f64,
   /// Fórmula molecular
   pub mol_formula: String,
+  /// Estructura detallada: átomos, enlaces y puntos de sustitución
+  pub structure: Option<Structure>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Structure {
+  pub atoms: Vec<Atom>,
+  pub bonds: Vec<Bond>,
+  #[serde(default)]
+  pub substitution_points: Vec<usize>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Atom {
+  pub index: usize,
+  pub atomic_number: u32,
+  pub symbol: String,
+  pub implicit_h: u32,
+  pub total_h: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Bond {
+  pub atom1: usize,
+  pub atom2: usize,
+  pub order: u8,
+  pub is_aromatic: bool,
 }
 pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
   Python::attach(|py| {
@@ -60,7 +87,8 @@ mod tests {
                        inchikey: "".to_string(),
                        num_atoms: 0,
                        mol_weight: 0.0,
-                       mol_formula: "".to_string() };
+                       mol_formula: "".to_string(),
+                       structure: None };
     assert_eq!(m.smiles, "");
     assert_eq!(m.num_atoms, 0);
   }
@@ -73,5 +101,38 @@ mod tests {
     assert_eq!(mol.num_atoms, 3);
     assert!((mol.mol_weight - 46.07).abs() < 0.1); // Peso molecular
                                                    // aproximado
+  }
+
+  #[test]
+  fn test_structure_atoms_and_bonds() {
+    // Verify that structure atoms, bonds and substitution points are present
+    init_python().expect("Fallo al inicializar Python/RDKit");
+    let smiles = "CCO"; // ethanol: C-C-O
+    let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
+    let s = mol.structure.expect("Expected structure to be present");
+    // atoms count should match num_atoms
+    assert_eq!(s.atoms.len() as u32, mol.num_atoms);
+    // there should be at least one bond
+    assert!(!s.bonds.is_empty(), "Expected at least one bond");
+    // check first atom fields
+    let a0 = &s.atoms[0];
+    assert!(a0.atomic_number > 0);
+    assert!(!a0.symbol.is_empty());
+    // substitution points should contain at least one heavy atom (indices)
+    assert!(!s.substitution_points.is_empty(), "Expected substitution points");
+  }
+
+  #[test]
+  fn test_benzene_aromatic_bonds() {
+    // Benzene has aromatic bonds; ensure is_aromatic is deserialized
+    init_python().expect("Fallo al inicializar Python/RDKit");
+    let smiles = "c1ccccc1"; // benzene
+    let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
+    let s = mol.structure.expect("Expected structure to be present");
+    // should have 6 carbon atoms
+    let carbons = s.atoms.iter().filter(|a| a.symbol == "C").count();
+    assert_eq!(carbons, 6);
+    // at least one bond should be aromatic
+    assert!(s.bonds.iter().any(|b| b.is_aromatic), "Expected aromatic bond");
   }
 }
