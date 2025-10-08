@@ -158,7 +158,11 @@ impl FlowRepository for InMemoryFlowRepository {
   fn load_snapshot(&self, snapshot_id: &Uuid) -> Result<(Vec<u8>, SnapshotMeta)> {
     let snaps = self.lock(&self.snapshots)?;
     let meta = snaps.get(snapshot_id).cloned().ok_or(FlowError::NotFound("snapshot".into()))?;
-    Ok((vec![], meta))
+    // En esta implementación in-memory, guardamos en `state_ptr` el string
+    // base64 del snapshot. Para rehidratación, devolvemos esos mismos bytes
+    // (string -> bytes) y el caller se encarga de decodificar base64 y
+    // deserializar el estado.
+    Ok((meta.state_ptr.as_bytes().to_vec(), meta))
   }
   /// Lee los `FlowData` para un `flow_id` a partir de `from_cursor`
   /// (exclusive), ordenados por cursor.
@@ -259,9 +263,8 @@ impl FlowRepository for InMemoryFlowRepository {
     self.lock(&self.snapshots)?.insert(id, meta);
     Ok(id)
   }
-  /// Crea una nueva rama en memoria: genera `new_id`, copia todos los
-  /// `FlowData` del padre con `cursor <= parent_cursor` y añade un
-  /// registro `BranchCreated` al final. Devuelve `new_id`.
+  /// Crea una nueva rama en memoria: genera `new_id` y copia todos los
+  /// `FlowData` del padre con `cursor <= parent_cursor`. Devuelve `new_id`.
   ///
   /// Comportamiento:
   /// - Si el padre no existe, se crea una metadata nueva basada en los
@@ -314,20 +317,7 @@ impl FlowRepository for InMemoryFlowRepository {
       entry.extend(copied);
     } else {
       // No hay pasos previos; esto es válido (branch vacío)
-      println!("[stub] no se encontraron pasos del padre para {}", parent_flow_id);
     }
-    // Crear un registro `BranchCreated` como siguiente cursor para la
-    // nueva rama (indica creación y referencia al padre).
-    let st = FlowData { id: Uuid::new_v4(),
-                        flow_id: new_id,
-                        cursor: parent_cursor + 1,
-                        key: "BranchCreated".into(),
-                        payload: serde_json::json!({"parent": parent_flow_id}),
-                        metadata: serde_json::json!({}),
-                        command_id: None,
-                        created_at: Utc::now() };
-    // Append the BranchCreated record for the new branch.
-    steps.entry(new_id).or_default().push(st);
     Ok(new_id)
   }
   /// Lock ligero: en memoria se simula comprobando versión; no hay
@@ -379,17 +369,11 @@ impl FlowRepository for InMemoryFlowRepository {
     Ok(meta.clone())
   }
   /// Cuenta cuántos pasos tiene un flow. -1 si no existe.
-  ///
-  /// Sólo cuenta pasos con `cursor <= current_cursor` del flujo para
-  /// evitar contabilizar registros auxiliares creados como helper.
   fn count_steps(&self, flow_id: &Uuid) -> Result<i64> {
     let flows = self.lock(&self.flows)?;
     if !flows.contains_key(flow_id) {
       return Ok(-1);
     }
-    // Only count steps up to the flow's current_cursor. This ensures
-    // that helper records (e.g. BranchCreated with cursor = parent_cursor+1)
-    // don't get counted as visible steps for the flow.
     let current_cursor = flows.get(flow_id).map(|m| m.current_cursor).unwrap_or(0);
     let steps = self.lock(&self.steps)?;
     let cnt = steps.get(flow_id).map(|v| v.iter().filter(|d| d.cursor <= current_cursor).count() as i64).unwrap_or(0);

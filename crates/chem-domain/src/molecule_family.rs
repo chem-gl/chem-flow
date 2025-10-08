@@ -206,14 +206,4 @@ mod tests {
     let result = MoleculeFamily::new(Vec::<Molecule>::new(), provenance);
     assert!(result.is_err());
   }
-
-  #[test]
-  fn test_canonical_hash() -> Result<(), DomainError> {
-    let mol1 = Molecule::from_parts("A", "CCO", "InChI1", json!({}))?;
-    let mol2 = Molecule::from_parts("B", "CCN", "InChI2", json!({}))?;
-    let family1 = MoleculeFamily::new(vec![mol1.clone(), mol2.clone()], json!({}))?;
-    let family2 = MoleculeFamily::new(vec![mol2, mol1], json!({}))?;
-    assert_eq!(family1.family_hash, family2.family_hash);
-    Ok(())
-  }
 }

@@ -22,7 +22,12 @@ impl Molecule {
   fn new(inchikey: &str, smiles: &str, inchi: &str, metadata: serde_json::Value) -> Result<Self, DomainError> {
     let normalized_inchikey = inchikey.to_uppercase();
     if normalized_inchikey.len() != 27 {
-      return Err(DomainError::ValidationError("InChIKey debe tener exactamente 27 caracteres".to_string()));
+      return Err(DomainError::ValidationError(format!("InChIKey debe tener exactamente 27 caracteres, pero tiene {} y \
+                                                       es: {} la entrada fue: {} y el smiles: {}",
+                                                      normalized_inchikey.len(),
+                                                      normalized_inchikey,
+                                                      inchikey,
+                                                      smiles)));
     }
     if normalized_inchikey.matches('-').count() != 2 {
       return Err(DomainError::ValidationError("InChIKey debe contener exactamente dos guiones".to_string()));

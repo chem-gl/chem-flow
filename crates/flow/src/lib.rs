@@ -2,9 +2,9 @@
 //!
 //! Este crate define los tipos de dominio (por ejemplo `FlowData`, `FlowMeta`),
 //! el contrato de persistencia `FlowRepository` y una implementación en memoria
-//! útil para pruebas (`InMemoryFlowRepository`). También expone un motor
-//! auxiliar `FlowEngine` con helpers ergonómicos para crear flujos, añadir
-//! pasos, crear ramas y gestionar snapshots.
+//! útil para pruebas (`InMemoryFlowRepository`). Se incluyen helpers
+//! ergonómicos en el propio repositorio para crear flujos, añadir pasos,
+//! crear ramas y gestionar snapshots.
 //!
 //! Diseño resumido:
 //! - Persistencia por registros: cada `FlowData` es autocontenido y permite
@@ -16,10 +16,17 @@
 //! Ejemplo rápido:
 //! ```rust
 //! use flow::stubs::InMemoryFlowRepository;
-//! use flow::engine::FlowEngineConfig;
+//! use flow::repository::FlowRepository;
 //! use std::sync::Arc;
+//!
 //! let repo = Arc::new(InMemoryFlowRepository::new());
-//! let engine = flow::FlowEngine::new(repo, FlowEngineConfig {});
+//! // Crear un nuevo flow
+//! let flow_id = repo.create_flow(
+//!     Some("test_flow".to_string()),
+//!     Some("active".to_string()),
+//!     serde_json::json!({})
+//! ).unwrap();
+//! println!("Created flow: {}", flow_id);
 //! ```
 //!
 //! Rehidratación y puntos de guardado (documentación en español):

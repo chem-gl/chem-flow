@@ -1,4 +1,5 @@
 // chemical_flow.rs
+use crate::engine::keys::step_state_key;
 use crate::step::{StepContext, StepInfo};
 use crate::{workflow_type::WorkflowType, WorkflowError};
 use base64::Engine;
@@ -160,7 +161,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
     let data = FlowData { id: Uuid::new_v4(),
                           flow_id: self.id(),
                           cursor,
-                          key: format!("step_state:{}", step_name),
+                          key: step_state_key(step_name),
                           payload: info.payload,
                           metadata: info.metadata,
                           command_id,
@@ -181,7 +182,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
   // --- Operaciones de repositorio delegadas ---
   /// Lee el payload del último paso ejecutado
   fn get_last_step_payload(&self, step_name: &str) -> Result<Option<JsonValue>, WorkflowError> {
-    let key = format!("step_state:{}", step_name);
+    let key = step_state_key(step_name);
     let data = self.flow_repo().read_data(&self.id(), 0)?;
     let payload = data.into_iter().rev().find(|fd| fd.key.eq_ignore_ascii_case(&key)).map(|fd| fd.payload);
     Ok(payload)
@@ -392,9 +393,12 @@ pub trait ChemicalFlowEngine: Send + Sync {
 
   /// Actualiza un campo específico en los metadatos
   fn update_metadata_field(&mut self, field: &str, value: JsonValue) -> Result<(), WorkflowError> {
-    let mut metadata = self.extract_metadata_field("flow_metadata").and_then(|m| m.as_object().cloned()).unwrap_or_default();
-    metadata.insert(field.to_string(), value);
-    self.set_metadata("flow_metadata", JsonValue::Object(metadata))
+    // Obtener el objeto de metadatos completo actualmente persistido bajo la key
+    // `flow_metadata`.
+    let full = self.get_metadata("flow_metadata").unwrap_or_else(|_| JsonValue::Object(serde_json::Map::new()));
+    let mut obj = full.as_object().cloned().unwrap_or_default();
+    obj.insert(field.to_string(), value);
+    self.set_metadata("flow_metadata", JsonValue::Object(obj))
   }
 }
 

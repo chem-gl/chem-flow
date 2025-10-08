@@ -6,6 +6,7 @@
 //! - Listar / inspeccionar datos persistidos
 use chem_domain::{DomainRepository, Molecule, MoleculeFamily};
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
+use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::Step4Input;
 use chem_workflow::flows::cadma_flow::steps::{
   admetsa_properties_step2::{ADMETSAMethod, ManualValues, PropertyValues, Step2Input, ALL_METHODS, REQUIRED_PROPERTIES},
   family_reference_step1::{Step1Input, Step1Payload},
@@ -358,6 +359,130 @@ fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
+/// Ejecuta interactivamente Step4 (ADMETSA para molécula(s) inicial(es))
+fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  println!("\n== Step4: ADMETSA para molécula inicial ==");
+
+  // Validar que existan Step2 y Step3
+  let step2_name = engine.step_name_by_index(1)?;
+  let step3_name = engine.step_name_by_index(2)?;
+  let _step2_payload = match engine.get_last_step_payload(&step2_name)? {
+    Some(v) => v,
+    None => {
+      println!("No se encontró resultado de Step2. Ejecuta Step2 primero.");
+      return Ok(());
+    }
+  };
+  let step3_payload = match engine.get_last_step_payload(&step3_name)? {
+    Some(v) => v,
+    None => {
+      println!("No se encontró resultado de Step3. Ejecuta Step3 primero.");
+      return Ok(());
+    }
+  };
+
+  // Determinar si Step2 usó método Manual en su configuración
+  use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::Step2Metadata;
+  let step2_meta_key = format!("step_state:{}", step2_name);
+  let rows = engine.flow_repo().read_data(&engine.id(), 0)?;
+  let mut step2_used_manual = false;
+  for fd in rows.iter().rev() {
+    if fd.key == step2_meta_key {
+      let meta: Step2Metadata = serde_json::from_value(fd.metadata.clone())?;
+      let input = meta.parameters.input;
+      if input.preferred_methods.iter().any(|m| matches!(m, ADMETSAMethod::Manual))
+         || input.method_property_map
+                 .as_ref()
+                 .map(|m| m.values().any(|mm| matches!(mm, ADMETSAMethod::Manual)))
+                 .unwrap_or(false)
+         || input.manual_values.is_some()
+      {
+        step2_used_manual = true;
+      }
+      break;
+    }
+  }
+
+  let mut override_methods: Option<Vec<ADMETSAMethod>> = None;
+  let mut manual_values: Option<ManualValues> = None;
+  if step2_used_manual {
+    println!("Step2 usó método Manual: puedes overridear métodos y/o cargar valores manuales para Step4.");
+    let raw = prompt("Métodos override (coma separados, enter = ninguno): ")?;
+    if !raw.trim().is_empty() {
+      let list: Vec<ADMETSAMethod> = raw.split(',')
+                                        .map(|s| s.trim())
+                                        .filter_map(|tok| match tok {
+                                          "Manual" => Some(ADMETSAMethod::Manual),
+                                          "Random1" => Some(ADMETSAMethod::Random1),
+                                          "Random2" => Some(ADMETSAMethod::Random2),
+                                          "Random3" => Some(ADMETSAMethod::Random3),
+                                          "Random4" => Some(ADMETSAMethod::Random4),
+                                          _ => None,
+                                        })
+                                        .collect();
+      if !list.is_empty() {
+        override_methods = Some(list);
+      }
+    }
+
+    // Si incluyen Manual o si quiere cargar manuales explícitamente, pedir valores
+    let wants_manual =
+      override_methods.as_ref().map(|v| v.iter().any(|m| matches!(m, ADMETSAMethod::Manual))).unwrap_or(false);
+    if wants_manual {
+      println!("Ingresa valores manuales para las moléculas generadas en Step3.");
+      // Determinar las moléculas desde step3_payload
+      #[derive(serde::Deserialize)]
+      struct SP3 {
+        generated_molecules: Vec<String>,
+      }
+      let sp3: SP3 = serde_json::from_value(step3_payload.clone())?;
+      // Necesitamos SMILES por InChIKey
+      let repo = engine.domain_repo();
+      let mut mv = ManualValues::new();
+      for ik in sp3.generated_molecules {
+        if let Some(m) = repo.get_molecule(&ik)? {
+          println!("Valores manuales para SMILES {}:", m.smiles());
+          println!("Propiedades requeridas: {}",
+                   REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", "));
+          loop {
+            let input = prompt("Prop=val,Prop=val,... : ")?;
+            let parsed = parse_manual_values(&input);
+            if let Ok(props) = parsed {
+              let valid: std::collections::HashSet<String> =
+                REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect();
+              let missing: Vec<String> = valid.iter().filter(|k| !props.contains_key(*k)).cloned().collect();
+              if !missing.is_empty() {
+                println!("Faltan propiedades: {}", missing.join(", "));
+                continue;
+              }
+              mv.insert(m.smiles().to_string(), props);
+              break;
+            } else {
+              println!("Formato inválido.");
+            }
+          }
+        }
+      }
+      manual_values = Some(mv);
+    }
+  } else {
+    println!("Step2 no usó Manual: Step4 reutilizará los métodos de Step2 (sin override).");
+  }
+
+  let input = Step4Input { override_methods, manual_values };
+  let json_input = serde_json::to_value(&input)?;
+  let step_idx = 3;
+  let step_name = engine.step_name_by_index(step_idx)?;
+  if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
+    println!("Step4 ya fue ejecutado previamente; omitiendo.");
+    return Ok(());
+  }
+  let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
+  engine.persist_step_result(&step_name, info, -1, None)?;
+  println!("Step4 ejecutado y persistido.");
+  Ok(())
+}
+
 /// Crea una rama desde un cursor especificado por el usuario
 fn create_branch_from_engine(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
   let flow_repo = engine.flow_repo();
@@ -446,6 +571,62 @@ fn list_families() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
+/// Ver una molécula y sus propiedades almacenadas
+fn view_molecule() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  let input = prompt("InChIKey de la molécula (enter para listar): ")?;
+
+  let inchikey = if input.trim().is_empty() {
+    let mols = repo.list_molecules()?;
+    if mols.is_empty() {
+      println!("No hay moléculas en el dominio.");
+      return Ok(());
+    }
+    println!("Moléculas disponibles ({}):", mols.len());
+    for (i, m) in mols.iter().enumerate() {
+      println!("  [{}] {}  | SMILES={} ", i, m.inchikey(), m.smiles());
+    }
+    let s = prompt("Selecciona índice: ")?;
+    let idx: usize = s.trim().parse().map_err(|_| "Índice inválido")?;
+    if idx >= mols.len() {
+      println!("Índice fuera de rango.");
+      return Ok(());
+    }
+    mols[idx].inchikey().to_string()
+  } else {
+    input.trim().to_uppercase()
+  };
+
+  match repo.get_molecule(&inchikey) {
+    Ok(Some(m)) => {
+      println!("\n== Molécula ==");
+      println!("InChIKey: {}", m.inchikey());
+      println!("SMILES:   {}", m.smiles());
+      println!("InChI:    {}", m.inchi());
+      println!("Metadata: {}",
+               serde_json::to_string_pretty(m.metadata()).unwrap_or_else(|_| "{}".to_string()));
+
+      match repo.get_molecular_properties(m.inchikey()) {
+        Ok(props) => {
+          println!("\nPropiedades ({}):", props.len());
+          for (i, p) in props.iter().enumerate() {
+            let val = serde_json::to_string_pretty(&p.value).unwrap_or_else(|_| "<no-json>".into());
+            println!("  [{}] tipo={}  calidad={}  valor={} ",
+                     i,
+                     p.property_type,
+                     p.quality.as_deref().unwrap_or("-"),
+                     val);
+          }
+        }
+        Err(e) => println!("Error obteniendo propiedades: {}", e),
+      }
+    }
+    Ok(None) => println!("No se encontró la molécula con InChIKey: {}", inchikey),
+    Err(e) => println!("Error consultando molécula: {}", e),
+  }
+  Ok(())
+}
+
 fn save_snapshot(engine: &CadmaFlow) {
   match engine.save_snapshot() {
     Ok(_) => println!("Snapshot guardado (best-effort)."),
@@ -475,11 +656,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("4) Ejecutar Step1 (Family)");
     println!("5) Ejecutar Step2 (ADMETSA)");
     println!("6) Ejecutar Step3 (Molecule Initial)");
-    println!("7) Crear rama desde cursor especificado");
+    println!("10) Ejecutar Step4 (ADMETSA para molécula inicial)");
     println!("7) Crear rama desde cursor especificado");
     println!("8) Dump flow_data (registros persistidos)");
     println!("9) Listar familias (dominio)");
     println!("a) Crear molécula (persistir en dominio)");
+    println!("c) Ver molécula (detalle y propiedades)");
     println!("b) Crear familia desde moléculas existentes en dominio");
     println!("0) Guardar snapshot");
     println!("q) Salir");
@@ -532,6 +714,15 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
+      "10" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          if let Err(e) = run_step4(engine) {
+            println!("Error en Step4: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
       "7" => {
         if let Some(engine) = &maybe_engine {
           if let Err(e) = create_branch_from_engine(engine) {
@@ -577,8 +768,14 @@ fn main() -> Result<(), Box<dyn Error>> {
           Err(e) => println!("Error creando molécula desde SMILES: {}", e),
         }
       }
+      "c" | "C" => {
+        if let Err(e) = view_molecule() {
+          println!("Error viendo molécula: {}", e);
+        }
+      }
       "b" => {
-        // Crear familia desde moléculas existentes en dominio
+        // Crear familia dneradas 1 moléculas usando método Manual"esde moléculas
+        // existentes en dominio
         let repo = match new_domain_from_env() {
           Ok(r) => r,
           Err(e) => {
@@ -599,7 +796,6 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("No se encontraron moléculas válidas; abortando creación de familia.");
           continue;
         }
-        let name = prompt("Nombre de la nueva familia (opcional): ")?;
         let fam = match MoleculeFamily::new(mols, serde_json::json!({})) {
           Ok(f) => f,
           Err(e) => {
