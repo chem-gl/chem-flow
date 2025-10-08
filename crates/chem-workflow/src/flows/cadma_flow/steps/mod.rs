@@ -1,5 +1,6 @@
 pub mod admetsa_initial_step4;
 pub mod admetsa_properties_step2;
+pub mod common;
 pub mod family_reference_step1;
 pub mod molecule_initial_step3;
 pub use admetsa_initial_step4::ADMETSAInitialStep4;

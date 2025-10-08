@@ -5,11 +5,12 @@
 //!   métodos y/o valores manuales. De lo contrario, se reutilizan los métodos
 //!   de Step2 sin posibilidad de override.
 
-use crate::errors::WorkflowError;
-use crate::flows::cadma_flow::steps::admetsa_properties_step2::{
-  ADMETSAMethod, ADMETSAProperty, ManualValues, Step2Input, Step2Metadata, REQUIRED_PROPERTIES,
-};
+use crate::flows::cadma_flow::steps::admetsa_properties_step2::{Step2Input, Step2Metadata};
+use crate::flows::cadma_flow::steps::common::{ADMETSAProperty, ManualValues, REQUIRED_PROPERTIES};
+use crate::{errors::WorkflowError, flows::cadma_flow::steps::common::ADMETSAMethod};
+
 use crate::flows::cadma_flow::steps::molecule_initial_step3::Step3Payload;
+use crate::impl_workflow_step;
 use crate::step::StepContext;
 use chem_domain::{Molecule, OwnedMolecularProperty};
 use serde::{Deserialize, Serialize};
@@ -192,8 +193,8 @@ impl ADMETSAInitialStep4 {
   }
 }
 
-crate::impl_workflow_step!(ADMETSAInitialStep4,
-                           Step4Payload,
-                           Step4Metadata,
-                           Step4Input,
-                           |this_self, ctx, input| { this_self.execute_step(ctx, input) });
+impl_workflow_step!(ADMETSAInitialStep4,
+                    Step4Payload,
+                    Step4Metadata,
+                    Step4Input,
+                    |this_self, ctx, input| { this_self.execute_step(ctx, input) });

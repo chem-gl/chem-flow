@@ -7,11 +7,13 @@
 use chem_domain::{DomainRepository, Molecule, MoleculeFamily};
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
 use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::Step4Input;
-use chem_workflow::flows::cadma_flow::steps::{
-  admetsa_properties_step2::{ADMETSAMethod, ManualValues, PropertyValues, Step2Input, ALL_METHODS, REQUIRED_PROPERTIES},
-  family_reference_step1::{Step1Input, Step1Payload},
-  molecule_initial_step3::{GenerationMethod, Step3Input},
+
+use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::Step2Input;
+use chem_workflow::flows::cadma_flow::steps::common::{
+  ADMETSAMethod, ManualValues, PropertyValues, ALL_METHODS, REQUIRED_PROPERTIES,
 };
+use chem_workflow::flows::cadma_flow::steps::family_reference_step1::{Step1Input, Step1Payload};
+use chem_workflow::flows::cadma_flow::steps::molecule_initial_step3::{GenerationMethod, Step3Input};
 use chem_workflow::{factory::ChemicalWorkflowFactory, flows::cadma_flow::CadmaFlow, ChemicalFlowEngine};
 use flow::repository::FlowRepository;
 use serde_json::json;

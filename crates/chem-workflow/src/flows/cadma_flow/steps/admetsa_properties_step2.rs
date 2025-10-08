@@ -6,106 +6,18 @@
 //! - Guarda cada propiedad en domain_repo como OwnedMolecularProperty.
 
 use crate::errors::WorkflowError;
+use crate::flows::cadma_flow::steps::common::{
+  ADMETSAController, ADMETSAMethod, ADMETSAProperty, ManualValues, MethodPropertyMap, PropertyCalculator,
+  REQUIRED_PROPERTIES,
+};
 use crate::flows::cadma_flow::steps::family_reference_step1::Step1Payload;
 use crate::step::StepContext;
 use chem_domain::{Molecule, OwnedMolecularProperty};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Tipos auxiliares:
-/// ManualValues: SMILES -> (prop_name_string -> value)
-pub type PropertyValues = HashMap<String, f64>;
-pub type ManualValues = HashMap<String, PropertyValues>;
-pub type MethodPropertyMap = HashMap<ADMETSAProperty, ADMETSAMethod>;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ADMETSAMethod {
-  Manual,
-  Random1,
-  Random2,
-  Random3,
-  Random4,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ADMETSAProperty {
-  LogP,
-  PSA,
-  AtX,
-  HBA,
-  HBD,
-  RB,
-  MR,
-  LD50,
-  Mutagenicity,
-  DevelopmentalToxicity,
-  SyntheticAccessibility,
-}
-
-pub const REQUIRED_PROPERTIES: [ADMETSAProperty; 11] = [ADMETSAProperty::LogP,
-                                                        ADMETSAProperty::PSA,
-                                                        ADMETSAProperty::AtX,
-                                                        ADMETSAProperty::HBA,
-                                                        ADMETSAProperty::HBD,
-                                                        ADMETSAProperty::RB,
-                                                        ADMETSAProperty::MR,
-                                                        ADMETSAProperty::LD50,
-                                                        ADMETSAProperty::Mutagenicity,
-                                                        ADMETSAProperty::DevelopmentalToxicity,
-                                                        ADMETSAProperty::SyntheticAccessibility];
-
-pub const ALL_METHODS: [ADMETSAMethod; 5] =
-  [ADMETSAMethod::Manual, ADMETSAMethod::Random1, ADMETSAMethod::Random2, ADMETSAMethod::Random3, ADMETSAMethod::Random4];
-
-impl ADMETSAMethod {
-  pub const fn can_generate(self, prop: ADMETSAProperty) -> bool {
-    use ADMETSAProperty::*;
-    matches!((self, prop),
-             (Self::Manual, _)
-             | (Self::Random1, LogP | PSA | AtX | HBA | HBD | RB | MR)
-             | (Self::Random2, LD50 | Mutagenicity | DevelopmentalToxicity | SyntheticAccessibility)
-             | (Self::Random3, HBD | RB | MR | LD50 | Mutagenicity)
-             | (Self::Random4, _))
-  }
-
-  pub const fn calculate_mock_value(self, prop: ADMETSAProperty) -> f64 {
-    match (self, prop) {
-      (Self::Random1, ADMETSAProperty::LogP) => 2.5,
-      (Self::Random1, ADMETSAProperty::PSA) => 45.0,
-      (Self::Random1, ADMETSAProperty::AtX) => 24.0,
-      (Self::Random1, ADMETSAProperty::HBA) => 3.0,
-      (Self::Random1, ADMETSAProperty::HBD) => 1.0,
-      (Self::Random1, ADMETSAProperty::RB) => 5.0,
-      (Self::Random1, ADMETSAProperty::MR) => 60.0,
-
-      (Self::Random2, ADMETSAProperty::LD50) => 350.0,
-      (Self::Random2, ADMETSAProperty::Mutagenicity) => 0.0,
-      (Self::Random2, ADMETSAProperty::DevelopmentalToxicity) => 0.0,
-      (Self::Random2, ADMETSAProperty::SyntheticAccessibility) => 3.2,
-
-      (Self::Random3, ADMETSAProperty::HBD) => 2.0,
-      (Self::Random3, ADMETSAProperty::RB) => 3.0,
-      (Self::Random3, ADMETSAProperty::MR) => 72.0,
-      (Self::Random3, ADMETSAProperty::LD50) => 250.0,
-      (Self::Random3, ADMETSAProperty::Mutagenicity) => 1.0,
-
-      (Self::Random4, ADMETSAProperty::LogP) => 3.1,
-      (Self::Random4, ADMETSAProperty::PSA) => 50.0,
-      (Self::Random4, ADMETSAProperty::AtX) => 25.0,
-      (Self::Random4, ADMETSAProperty::HBA) => 4.0,
-      (Self::Random4, ADMETSAProperty::HBD) => 1.5,
-      (Self::Random4, ADMETSAProperty::RB) => 4.0,
-      (Self::Random4, ADMETSAProperty::MR) => 65.0,
-      (Self::Random4, ADMETSAProperty::LD50) => 300.0,
-      (Self::Random4, ADMETSAProperty::Mutagenicity) => 0.5,
-      (Self::Random4, ADMETSAProperty::DevelopmentalToxicity) => 0.2,
-      (Self::Random4, ADMETSAProperty::SyntheticAccessibility) => 2.8,
-
-      _ => 0.0,
-    }
-  }
-}
+// Tipos ahora vienen de common
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step2Input {
@@ -163,47 +75,19 @@ impl ADMETSAPropertiesStep2 {
   /// Validación principal: el mapeo + métodos preferidos deben cubrir las
   /// propiedades requeridas.
   fn validate_methods_cover(&self, input: &Step2Input) -> Result<(), WorkflowError> {
-    let mut covered = HashSet::<ADMETSAProperty>::new();
-
-    if let Some(map) = &input.method_property_map {
-      for (&prop, &method) in map {
-        if !method.can_generate(prop) {
-          return Err(WorkflowError::Validation(format!("Método {:?} no puede generar la propiedad {:?}", method, prop)));
-        }
-        covered.insert(prop);
-      }
-    }
-
-    for &prop in &REQUIRED_PROPERTIES {
-      if covered.contains(&prop) {
-        continue;
-      }
-      let ok = input.preferred_methods.iter().any(|&m| m.can_generate(prop));
-      if !ok {
-        return Err(WorkflowError::Validation(format!("Ningún método preferido puede generar {:?}", prop)));
-      }
-      covered.insert(prop);
-    }
-
-    Ok(())
+    ADMETSAController.validate_methods_cover(&input.preferred_methods, &input.method_property_map)
   }
 
   /// Obtiene el método a usar para una propiedad (mapa explícito > preferencia
   /// > Manual por default)
   fn choose_method(&self, prop: ADMETSAProperty, input: &Step2Input) -> ADMETSAMethod {
-    if let Some(map) = &input.method_property_map {
-      if let Some(&m) = map.get(&prop) {
-        return m;
-      }
-    }
-    input.preferred_methods.iter().copied().find(|&m| m.can_generate(prop)).unwrap_or(ADMETSAMethod::Manual)
+    ADMETSAController.choose_method(prop, &input.preferred_methods, &input.method_property_map)
   }
 
   /// Intenta obtener valor manual si existe; la clave interna en ManualValues
   /// se hace con `format!("{:?}", prop)`.
   fn manual_value_for(&self, smiles: &str, prop: ADMETSAProperty, input: &Step2Input) -> Option<f64> {
-    let prop_key = format!("{:?}", prop);
-    input.manual_values.as_ref().and_then(|mv| mv.get(smiles)).and_then(|pv| pv.get(&prop_key).copied())
+    ADMETSAController.manual_value_for(smiles, prop, &input.manual_values)
   }
 
   /// Calcula (mock) los OwnedMolecularProperty para una molécula.
@@ -213,7 +97,6 @@ impl ADMETSAPropertiesStep2 {
                                      input: &Step2Input)
                                      -> Result<Vec<OwnedMolecularProperty>, WorkflowError> {
     let smiles = molecule.smiles().to_string();
-    let inchikey = molecule.inchikey().to_string();
     let mut props = Vec::with_capacity(REQUIRED_PROPERTIES.len());
 
     for &prop in &REQUIRED_PROPERTIES {
@@ -221,19 +104,8 @@ impl ADMETSAPropertiesStep2 {
 
       // Prioridad: manual_values override
       if let Some(v) = self.manual_value_for(&smiles, prop, input) {
-        let metadata = serde_json::json!({
-            "method": "manual",
-            "family_id": family_id.to_string(),
-            "step": "ADMETSAPropertiesStep2"
-        });
-        props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
-                                            molecule_inchikey: inchikey.clone(),
-                                            property_type: format!("{:?}", prop),
-                                            value: serde_json::json!(v),
-                                            quality: Some("manual".to_string()),
-                                            preferred: true,
-                                            value_hash: format!("{:?}_{}", prop, v),
-                                            metadata });
+        let calc = PropertyCalculator;
+        props.push(calc.build_manual_property(molecule, family_id, prop, v));
         continue;
       }
 
@@ -243,20 +115,8 @@ impl ADMETSAPropertiesStep2 {
         if let Some(m_pref) =
           input.preferred_methods.iter().copied().find(|&m| m != ADMETSAMethod::Manual && m.can_generate(prop))
         {
-          let v = m_pref.calculate_mock_value(prop);
-          let metadata = serde_json::json!({
-              "method": format!("{:?}", m_pref),
-              "family_id": family_id.to_string(),
-              "step": "ADMETSAPropertiesStep2"
-          });
-          props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
-                                              molecule_inchikey: inchikey.clone(),
-                                              property_type: format!("{:?}", prop),
-                                              value: serde_json::json!(v),
-                                              quality: Some("calculated".to_string()),
-                                              preferred: true,
-                                              value_hash: format!("{:?}_{}", prop, v),
-                                              metadata });
+          let calc = PropertyCalculator;
+          props.push(calc.build_calculated_property(molecule, family_id, prop, m_pref));
           continue;
         } else {
           return Err(WorkflowError::Validation(format!("Método Manual asignado para {:?} pero no existe valor manual \
@@ -270,21 +130,8 @@ impl ADMETSAPropertiesStep2 {
         return Err(WorkflowError::Validation(format!("Método {:?} no puede generar la propiedad {:?}", method, prop)));
       }
 
-      let v = method.calculate_mock_value(prop);
-      let metadata = serde_json::json!({
-          "method": format!("{:?}", method),
-          "family_id": family_id.to_string(),
-          "step": "ADMETSAPropertiesStep2"
-      });
-
-      props.push(OwnedMolecularProperty { id: Uuid::new_v4(),
-                                          molecule_inchikey: inchikey.clone(),
-                                          property_type: format!("{:?}", prop),
-                                          value: serde_json::json!(v),
-                                          quality: Some("calculated".to_string()),
-                                          preferred: true,
-                                          value_hash: format!("{:?}_{}", prop, v),
-                                          metadata });
+      let calc = PropertyCalculator;
+      props.push(calc.build_calculated_property(molecule, family_id, prop, method));
     }
 
     Ok(props)
@@ -296,10 +143,7 @@ impl ADMETSAPropertiesStep2 {
                       generated: &[GeneratedPropertyEntry],
                       preferred_methods: &[ADMETSAMethod])
                       -> HashMap<String, SelectedPropertyEntry> {
-    let mut by_prop: HashMap<String, Vec<&GeneratedPropertyEntry>> = HashMap::new();
-    for e in generated {
-      by_prop.entry(e.property_type.clone()).or_default().push(e);
-    }
+    let by_prop = ADMETSAController.group_by_property(generated, |g| &g.property_type);
 
     let pref_strs: Vec<String> = preferred_methods.iter().map(|m| format!("{:?}", m)).collect();
     let mut chosen = HashMap::with_capacity(by_prop.len());
