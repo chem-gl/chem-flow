@@ -77,6 +77,21 @@ pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
     Ok(molecule)
   })
 }
+
+/// Fusiona dos moléculas usando RDKit creando un enlace entre atom_a y atom_b.
+pub fn fuse_molecules(smiles_a: &str, smiles_b: &str, atom_a: usize, atom_b: usize, bond_order: u8) -> PyResult<Molecule> {
+  Python::attach(|py| {
+    let rdkit_py = get_module(py)?;
+    let rdkit = rdkit_py.bind(py);
+    let fused_dict = rdkit.getattr("fuse_molecules")?.call1((smiles_a, smiles_b, atom_a, atom_b, bond_order))?;
+    let json_str: String = py.import("json")?.call_method1("dumps", (fused_dict,))?.extract()?;
+    let molecule: Molecule = serde_json::from_str(&json_str).map_err(|e| {
+                               PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Error de deserialización fuse: {}",
+                                                                                       e))
+                             })?;
+    Ok(molecule)
+  })
+}
 #[cfg(test)]
 mod tests {
   use super::*;

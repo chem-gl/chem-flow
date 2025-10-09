@@ -14,6 +14,7 @@ base64 = "0.22"
 flow = { path = "../flow" }
 chem-domain = { path = "../chem-domain" }
 chem-persistence = { path = "../chem-persistence" }
+chem-providers = { path = "../chem-providers" }
 [lib]
 name = "chem_workflow"
 path = "src/lib.rs"

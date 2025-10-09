@@ -6,7 +6,9 @@
 //! - Listar / inspeccionar datos persistidos
 use chem_domain::{DomainRepository, Molecule, MoleculeFamily};
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
-use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::Step4Input;
+use chem_workflow::flows::cadma_flow::steps::admetsa_generated_step6::Step6Input;
+use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::{Step4Input, Step4Payload};
+use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Input;
 
 use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::Step2Input;
 use chem_workflow::flows::cadma_flow::steps::common::{
@@ -19,6 +21,7 @@ use flow::repository::FlowRepository;
 use serde_json::json;
 use std::error::Error;
 use std::io::{self, Write};
+
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -636,6 +639,217 @@ fn save_snapshot(engine: &CadmaFlow) {
   }
 }
 
+/// Ejecuta interactivamente Step5 (Generación de sustituciones)
+fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  // Step5 interactive execution
+  println!("\n== Step5: Generación de sustituciones ==");
+  // Necesita Step4
+  let step4_name = engine.step_name_by_index(3)?; // Step4 index
+  let step4_payload_val = match engine.get_last_step_payload(&step4_name)? {
+    Some(v) => v,
+    None => {
+      println!("No se encontró resultado de Step4. Ejecuta Step4 primero.");
+      return Ok(());
+    }
+  };
+  let step4_payload: Step4Payload = serde_json::from_value(step4_payload_val)?;
+
+  // Seleccionar/crear familia de sustituyentes
+  let domain = engine.domain_repo();
+  let families = domain.list_families()?;
+  println!("Familias disponibles (para elegir substituyentes):");
+  for (i, f) in families.iter().enumerate() {
+    let name = f.name().map(|s| s.to_string()).unwrap_or_else(|| "sin nombre".to_string());
+    println!("  [{}] {} ({} moléculas) id={}", i, name, f.molecules().len(), f.id());
+  }
+  println!("  [n] Crear nueva familia de substituyentes");
+  let choice = prompt("Elige índice o 'n' para crear nueva: ")?;
+  let substituent_family_id = if choice.trim().eq_ignore_ascii_case("n") {
+    let smiles_line = prompt("SMILES substituyentes (coma separados): ")?;
+    let mut mols = Vec::new();
+    for s in smiles_line.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+      match Molecule::from_smiles(s) {
+        Ok(m) => mols.push(m),
+        Err(e) => println!("SMILES inválido '{}' ({}) ignorado", s, e),
+      }
+    }
+    if mols.is_empty() {
+      println!("No se crearon moléculas para la nueva familia. Abortando Step5.");
+      return Ok(());
+    }
+    let fam = MoleculeFamily::new(mols, serde_json::json!({"source":"interactive_step5"}))?;
+    let fid = domain.save_family(fam)?;
+    println!("Familia de substituyentes creada con id={}", fid);
+    fid
+  } else {
+    let idx: usize = match choice.trim().parse() {
+      Ok(v) => v,
+      Err(_) => {
+        println!("Entrada inválida.");
+        return Ok(());
+      }
+    };
+    if idx >= families.len() {
+      println!("Índice fuera de rango.");
+      return Ok(());
+    }
+    families[idx].id()
+  };
+
+  // Parámetros base
+  let r_sub = prompt("Máximo número de sustituyentes a insertar (r_substitutes, entero >0): ")?;
+  let r_substitutes: usize = r_sub.trim().parse().unwrap_or(1);
+  let nb = prompt("Máximo orden de enlace a explorar (num_bounds 1..3) [1]: ")?;
+  let num_bounds: usize = if nb.trim().is_empty() { 1 } else { nb.trim().parse().unwrap_or(1) };
+  let repeat_ans = prompt("Permitir reutilizar puntos/sustituyentes (repeat) [n]: ")?;
+  let repeat = matches!(repeat_ans.trim().to_lowercase().as_str(), "y" | "s" | "si" | "yes");
+  let save_ans = prompt("Guardar moléculas generadas en dominio? [Y/n]: ")?;
+  let save_generated = !matches!(save_ans.trim().to_lowercase().as_str(), "n" | "no");
+
+  // Overrides de puntos de unión principal
+  println!("Puedes especificar puntos de sustitución (índices de átomos) para las moléculas principales.");
+  println!("Deja vacío para usar los detectados automáticamente por RDKit (átomos con hidrógenos disponibles).");
+  let mut principal_join_points: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+  for ik in &step4_payload.generated_for {
+    if let Some(m) = domain.get_molecule(ik)? {
+      let ans = prompt(&format!("Puntos para principal {} (SMILES {}): ", ik, m.smiles()))?;
+      if !ans.trim().is_empty() {
+        let pts: Vec<usize> =
+          ans.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+        if !pts.is_empty() {
+          principal_join_points.insert(ik.clone().to_string(), pts);
+        }
+      }
+    }
+  }
+  if principal_join_points.is_empty() {
+    println!("Usando puntos automáticos RDKit para principales.");
+  }
+
+  // Overrides de puntos de unión para substituyentes (sobre InChIKey)
+  println!("Overrides de puntos para sustituyentes (por InChIKey). Deja vacío para usar automáticos.");
+  let sub_family = domain.get_family(&substituent_family_id)?.ok_or("Familia no encontrada tras crearla")?;
+  let mut substitute_family_join_points: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+  for sm in sub_family.molecules() {
+    let ik = sm.inchikey().to_string();
+    let ans = prompt(&format!("Puntos para sustituyente {} (SMILES {}): ", ik, sm.smiles()))?;
+    if !ans.trim().is_empty() {
+      let pts: Vec<usize> =
+        ans.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+      if !pts.is_empty() {
+        substitute_family_join_points.insert(ik, pts);
+      }
+    }
+  }
+  if substitute_family_join_points.is_empty() {
+    println!("Usando puntos automáticos RDKit para sustituyentes.");
+  }
+
+  let input =
+    Step5Input { substitute_family_id: Some(substituent_family_id),
+                 principal_join_points: if principal_join_points.is_empty() { None } else { Some(principal_join_points) },
+                 substitute_family_join_points: if substitute_family_join_points.is_empty() {
+                   None
+                 } else {
+                   Some(substitute_family_join_points)
+                 },
+                 r_substitutes,
+                 num_bounds,
+                 repeat,
+                 save_generated,
+                 include_principal: true,
+                 permutation_limit: 0 };
+
+  let step_idx = 4; // Step5 index
+  let step_name = engine.step_name_by_index(step_idx)?;
+  if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
+    let rerun = prompt("Step5 ya tiene un resultado previo. Re-ejecutar? (y/N): ")?;
+    if !matches!(rerun.trim().to_lowercase().as_str(), "y" | "s" | "si" | "yes") {
+      println!("Omitiendo ejecución de Step5.");
+      return Ok(());
+    }
+  }
+  let json_input = serde_json::to_value(&input)?;
+  let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
+  engine.persist_step_result(&step_name, info, -1, None)?;
+  println!("Step5 ejecutado y persistido.");
+  Ok(())
+}
+
+/// Ejecuta interactivamente Step6 (ADMETSA sobre moléculas generadas en Step5)
+fn run_step6(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
+  use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Payload;
+  println!("\n== Step6: ADMETSA para moléculas generadas en Step5 ==");
+  let step5_name = engine.step_name_by_index(4)?; // index Step5
+  let step5_payload_val = match engine.get_last_step_payload(&step5_name)? {
+    Some(v) => v,
+    None => {
+      println!("No se encontró resultado de Step5. Ejecuta Step5 primero.");
+      return Ok(());
+    }
+  };
+  let step5_payload: Step5Payload = serde_json::from_value(step5_payload_val)?;
+  if step5_payload.generated_molecules.is_empty() {
+    println!("Step5 no generó moléculas.");
+    return Ok(());
+  }
+  let ov_raw = prompt("Métodos override (coma, enter = ninguno): ")?;
+  let override_methods: Option<Vec<ADMETSAMethod>> = if ov_raw.trim().is_empty() {
+    None
+  } else {
+    let v: Vec<ADMETSAMethod> = ov_raw.split(',')
+                                      .map(|s| s.trim())
+                                      .filter_map(|tok| match tok {
+                                        "Manual" => Some(ADMETSAMethod::Manual),
+                                        "Random1" => Some(ADMETSAMethod::Random1),
+                                        "Random2" => Some(ADMETSAMethod::Random2),
+                                        "Random3" => Some(ADMETSAMethod::Random3),
+                                        "Random4" => Some(ADMETSAMethod::Random4),
+                                        _ => None,
+                                      })
+                                      .collect();
+    if v.is_empty() {
+      None
+    } else {
+      Some(v)
+    }
+  };
+  let mut manual_values: Option<ManualValues> = None;
+  if override_methods.as_ref().map(|m| m.iter().any(|mm| matches!(mm, ADMETSAMethod::Manual))).unwrap_or(false) {
+    println!("Override incluye Manual: puedes proporcionar valores manuales.");
+    let mut mv = ManualValues::new();
+    println!("Propiedades requeridas: {}",
+             REQUIRED_PROPERTIES.iter().map(|p| format!("{:?}", p)).collect::<Vec<_>>().join(", "));
+    for ik in &step5_payload.generated_molecules {
+      if let Some(m) = engine.domain_repo().get_molecule(ik)? {
+        let ans = prompt(&format!("Valores para {} (Prop=val,...) [enter salta]: ", m.smiles()))?;
+        if ans.trim().is_empty() {
+          continue;
+        }
+        match parse_manual_values(&ans) {
+          Ok(map) => {
+            mv.insert(m.smiles().to_string(), map);
+          }
+          Err(e) => {
+            println!("Formato inválido: {}", e);
+          }
+        }; // end match
+      }
+    }
+    if !mv.is_empty() {
+      manual_values = Some(mv);
+    }
+  }
+  let input = Step6Input { override_methods, manual_values };
+  let step_idx = 5; // Step6 index
+  let step_name = engine.step_name_by_index(step_idx)?;
+  let json_input = serde_json::to_value(&input)?;
+  let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
+  engine.persist_step_result(&step_name, info, -1, None)?;
+  println!("Step6 ejecutado y persistido.");
+  Ok(())
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
   println!("🚀 CadmaFlow Interactive Demo (mejorado)");
   // Inicializar repositorio (verificamos configuración)
@@ -659,6 +873,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("5) Ejecutar Step2 (ADMETSA)");
     println!("6) Ejecutar Step3 (Molecule Initial)");
     println!("10) Ejecutar Step4 (ADMETSA para molécula inicial)");
+    println!("11) Ejecutar Step5 (Generación de sustituciones)");
+    println!("12) Ejecutar Step6 (ADMETSA para generadas Step5)");
     println!("7) Crear rama desde cursor especificado");
     println!("8) Dump flow_data (registros persistidos)");
     println!("9) Listar familias (dominio)");
@@ -720,6 +936,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(engine) = maybe_engine.as_mut() {
           if let Err(e) = run_step4(engine) {
             println!("Error en Step4: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "11" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          if let Err(e) = run_step5(engine) {
+            println!("Error en Step5: {}", e);
+          }
+        } else {
+          println!("Carga o crea un flow primero.");
+        }
+      }
+      "12" => {
+        if let Some(engine) = maybe_engine.as_mut() {
+          if let Err(e) = run_step6(engine) {
+            println!("Error en Step6: {}", e);
           }
         } else {
           println!("Carga o crea un flow primero.");

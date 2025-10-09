@@ -12,6 +12,7 @@
 10. [Ejemplos de uso](#ejemplos-de-uso)
 11. [Cobertura y análisis estático](#cobertura-y-análisis-estático)
 12. [Notas y buenas prácticas](#notas-y-buenas-prácticas)
+13. [Step5: Generación de sustituciones](#step5-generación-de-sustituciones)
 ---
 ## Descripción general
 Este workspace implementa una plataforma modular para modelar, versionar y persistir flujos de trabajo y entidades químicas (moléculas, familias, propiedades) con integridad y trazabilidad. Incluye:
@@ -395,6 +396,73 @@ fn main() {
 - Los diagramas Mermaid pueden exportarse a SVG/PNG si tu visor no los soporta.
 - Abre issues para inconsistencias entre schema Diesel y migraciones.
 - El ciclo de vida recomendado: desarrolla en `app-dev`, ejecuta tests y cobertura en Docker, y usa Sonar para análisis estático.
+
+---
+## Step5: Generación de sustituciones
+El Step5 (`SubstituteGenerationStep5`) expande moléculas principales (resultado de Step4) generando todas las permutaciones posibles de unión con una familia de sustituyentes. Usa RDKit para:
+- Validar SMILES y obtener representación canónica.
+- Identificar puntos de sustitución (átomos con hidrógenos disponibles) tanto en la molécula principal como en los sustituyentes.
+- Verificar factibilidad preliminar de enlace (hidrógenos disponibles) antes de intentar una fusión.
+- Fusionar (crear un enlace) entre la molécula acumulada y cada sustituyente seleccionado.
+
+### Parámetros (`Step5Input`)
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `substitute_family_id` | `Uuid` | Identificador de la familia de sustituyentes. |
+| `principal_join_points` | `HashMap<InChIKey, Vec<usize>>` | Overrides opcionales de puntos de unión por molécula principal. |
+| `substitute_family_join_points` | `HashMap<InChIKey, Vec<usize>>` | Overrides de puntos de unión para sustituyentes. |
+| `r_substitutes` | `usize` | Máximo número de sustituyentes a insertar (k máximo). |
+| `num_bounds` | `usize (1..=3)` | Orden de enlace a explorar (1,2,3). |
+| `repeat` | `bool` | Permite reutilizar mismos puntos y/o sustituyentes. |
+| `save_generated` | `bool` | Persiste las moléculas resultantes en el dominio. |
+| `include_principal` | `bool` | Incluye la molécula principal sin modificaciones (k=0). |
+| `permutation_limit` | `usize` | Límite máximo de permutaciones exploradas (0 = sin límite). |
+
+### Estrategia de generación
+Para cada molécula principal se generan permutaciones ordenadas de longitud k para todos los k en `1..=r_substitutes` (y opcionalmente k=0). Para cada permutación de puntos principales y sustituyentes:
+1. Se calcula el producto cartesiano de los puntos de unión de cada sustituyente seleccionado.
+2. Se itera sobre los órdenes de enlace permitidos (1..=num_bounds).
+3. Antes de fusionar, se valida factibilidad: ambos átomos deben tener hidrógenos disponibles (`total_h > 0`).
+4. Se fusiona la cadena incrementalmente y se obtiene el InChIKey resultante (para de-duplicación).
+
+### Control de explosión combinatoria
+La cantidad de permutaciones crece rápidamente. Use `permutation_limit` para cortar y dejar constancia mediante un warning. Recomendaciones:
+- Ajustar `r_substitutes` a un máximo razonable (e.g. 3–4) al inicio.
+- Activar `repeat=false` si no se desea crecimiento factorial por reutilización.
+- Probar primero con un subconjunto reducido de sustituyentes.
+
+### Ejecución interactiva (demo `cadma_example`)
+En el menú, tras ejecutar Step4, seleccionar opción `11`:
+```
+11) Ejecutar Step5 (Generación de sustituciones)
+```
+Se solicitará:
+1. Selección o creación de familia de sustituyentes.
+2. Parámetros `r_substitutes`, `num_bounds`, `repeat`, `save_generated`.
+3. Overrides opcionales de puntos de unión (índices de átomos) para moléculas principales y sustituyentes.
+
+Ejemplo rápido (sin overrides, explorando hasta 2 sustituyentes, enlaces simples):
+```
+Máximo número de sustituyentes a insertar (r_substitutes, entero >0): 2
+Máximo orden de enlace a explorar (num_bounds 1..3) [1]: 1
+Permitir reutilizar puntos/sustituyentes (repeat) [n]: n
+Guardar moléculas generadas en dominio? [Y/n]: y
+```
+
+### Resultados
+El `Step5Payload` incluye:
+- `generated_for`: InChIKeys de moléculas principales procesadas.
+- `generated_molecules`: InChIKeys de nuevas moléculas generadas (o principales si `include_principal=true`).
+- `generated_count`: total persistido.
+- `step_result`: estado con contador de permutaciones exploradas.
+Warnings en metadata reflejan: límites alcanzados, ausencia de puntos, explosión combinatoria, etc.
+
+### Futuras extensiones sugeridas
+- Filtrado químico adicional (valencia explícita, SMARTS).
+- Reglas de exclusión (lista negra de sustituyentes o patrones).
+- Persistencia incremental con batching y streaming.
+
+---
 ---
 ## Funcionamiento general y flujo de uso
 ### ¿Cómo funciona el sistema?
