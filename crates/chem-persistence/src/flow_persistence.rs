@@ -1,9 +1,9 @@
 //! Lógica de persistencia para el dominio (migrado desde lib.rs)
+use crate::db::run_migrations_on_pool;
 use chrono::{TimeZone, Utc};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::Error as DieselError;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use flow::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
 use flow::errors::{FlowError, Result as FlowResult};
 use flow::repository::{ArtifactStore, FlowRepository, SnapshotStore};
@@ -17,18 +17,32 @@ use crate::schema;
 use crate::schema::flow_data::dsl as data_dsl;
 use crate::schema::flows::dsl as flows_dsl;
 use crate::schema::*;
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(feature = "postgres")]
 type DbPool = Pool<ConnectionManager<PgConnection>>;
-#[cfg(any(test, not(feature = "pg")))]
+#[cfg(not(feature = "postgres"))]
 type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 pub struct DieselFlowRepository {
   pool: Arc<DbPool>,
   snapshot_dir: String,
   artifact_dir: String,
 }
-#[derive(Debug, Queryable, Insertable)]
+#[cfg(all(test, feature = "sqlite", not(feature = "postgres")))]
+struct FlowTestGuard {
+  _db: crate::test_helpers::TestSqliteDb,
+  snapshot_dir: std::path::PathBuf,
+  artifact_dir: std::path::PathBuf,
+}
+
+#[cfg(all(test, feature = "sqlite", not(feature = "postgres")))]
+impl Drop for FlowTestGuard {
+  fn drop(&mut self) {
+    let _ = std::fs::remove_dir_all(&self.snapshot_dir);
+    let _ = std::fs::remove_dir_all(&self.artifact_dir);
+  }
+}
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = flows)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 struct FlowRow {
   id: String,
   name: Option<String>,
@@ -41,8 +55,9 @@ struct FlowRow {
   parent_cursor: Option<i64>,
   metadata: String,
 }
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = flow_data)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 struct FlowDataRow {
   id: String,
   flow_id: String,
@@ -53,8 +68,9 @@ struct FlowDataRow {
   command_id: Option<String>,
   created_at_ts: i64,
 }
-#[derive(Debug, Queryable, Insertable)]
+#[derive(Debug, Queryable, Insertable, Selectable)]
 #[diesel(table_name = snapshots)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 struct SnapshotRow {
   id: String,
   flow_id: String,
@@ -63,38 +79,54 @@ struct SnapshotRow {
   metadata: String,
   created_at_ts: i64,
 }
-#[cfg(any(test, not(feature = "pg")))]
+
 impl DieselFlowRepository {
-  pub fn new(database_url: &str) -> Self {
+  fn default_snapshot_dir() -> String {
+    std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string())
+  }
+
+  fn default_artifact_dir() -> String {
+    std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string())
+  }
+
+  pub fn new_with_pool(pool: DbPool) -> FlowResult<Self> {
+    Self::with_pool_and_dirs(pool, Self::default_snapshot_dir(), Self::default_artifact_dir())
+  }
+
+  pub fn with_pool_and_dirs(pool: DbPool, snapshot_dir: String, artifact_dir: String) -> FlowResult<Self> {
+    fs::create_dir_all(&snapshot_dir).map_err(|e| FlowError::Storage(format!("snapshot dir: {}", e)))?;
+    fs::create_dir_all(&artifact_dir).map_err(|e| FlowError::Storage(format!("artifact dir: {}", e)))?;
+    run_migrations_on_pool(&pool).map_err(|e| FlowError::Storage(format!("migrations: {}", e)))?;
+    Ok(DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir })
+  }
+
+  pub fn pool(&self) -> Arc<DbPool> {
+    Arc::clone(&self.pool)
+  }
+}
+#[cfg(not(feature = "postgres"))]
+impl DieselFlowRepository {
+  pub fn try_new(database_url: &str) -> FlowResult<Self> {
     let manager = ConnectionManager::<SqliteConnection>::new(database_url);
     let pool = Pool::builder().max_size(1).build(manager).expect("no se pudo crear el pool de conexiones");
-    let snapshot_dir = std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string());
-    let artifact_dir = std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string());
-    fs::create_dir_all(&snapshot_dir).ok();
-    fs::create_dir_all(&artifact_dir).ok();
-    let repo = DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir };
-    if let Ok(mut c) = repo.conn_raw() {
-      let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut c);
-      let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut c);
-      match c.run_pending_migrations(MIGRATIONS) {
-        Ok(applied) => eprintln!("chem-persistence (test sqlite): aplicadas {} migraciones embebidas",
-                                 applied.len()),
-        Err(e) => eprintln!("chem-persistence (test sqlite): fallo al ejecutar migraciones embebidas: {}", e),
-      }
-    }
-    repo
+    DieselFlowRepository::new_with_pool(pool)
+  }
+
+  pub fn new(database_url: &str) -> Self {
+    DieselFlowRepository::try_new(database_url).expect("failed to initialize DieselFlowRepository")
   }
   pub fn conn(&self) -> FlowResult<PooledConnection<ConnectionManager<SqliteConnection>>> {
     self.conn_raw().map_err(|e| FlowError::Storage(format!("pool: {}", e)))
   }
   fn conn_raw(&self) -> std::result::Result<PooledConnection<ConnectionManager<SqliteConnection>>, r2d2::Error> {
+    #[cfg_attr(feature = "postgres", allow(unused_mut))]
     let mut conn = self.pool.get()?;
     let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut conn);
     let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut conn);
     Ok(conn)
   }
 }
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(feature = "postgres")]
 impl DieselFlowRepository {
   pub fn conn(&self) -> FlowResult<PooledConnection<ConnectionManager<PgConnection>>> {
     self.conn_raw().map_err(|e| FlowError::Storage(format!("pool: {}", e)))
@@ -103,7 +135,7 @@ impl DieselFlowRepository {
     self.pool.get()
   }
 }
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(all(feature = "postgres", not(test)))]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
   dotenvy::dotenv().ok();
   let url = std::env::var("DATABASE_URL").map_err(|_| FlowError::Other("DATABASE_URL not set".into()))?;
@@ -112,19 +144,40 @@ pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
   }
   DieselFlowRepository::new_pg(&url)
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite", not(feature = "postgres")))]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
-  dotenvy::dotenv().ok();
-  let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "file:memdb1?mode=memory&cache=shared".into());
-  let repo = DieselFlowRepository::new(&url);
+  use crate::test_helpers::create_temp_sqlite_db;
+  use once_cell::sync::Lazy;
+  use std::sync::Mutex;
+
+  static FLOW_GUARDS: Lazy<Mutex<Vec<FlowTestGuard>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+  let db = create_temp_sqlite_db().map_err(|e| FlowError::Other(format!("sqlite helper: {}", e)))?;
+  let snapshot_dir = std::env::temp_dir().join(format!("chemflow_snapshots_{}", Uuid::new_v4()));
+  let artifact_dir = std::env::temp_dir().join(format!("chemflow_artifacts_{}", Uuid::new_v4()));
+  let repo = DieselFlowRepository::with_pool_and_dirs(db.pool.clone(),
+                                                      snapshot_dir.to_string_lossy().into_owned(),
+                                                      artifact_dir.to_string_lossy().into_owned())?;
+  let guard = FlowTestGuard { _db: db, snapshot_dir, artifact_dir };
+  FLOW_GUARDS.lock().expect("poisoned sqlite flow guard mutex").push(guard);
   Ok(repo)
 }
-#[cfg(all(not(feature = "pg"), not(test)))]
+#[cfg(all(test, feature = "postgres"))]
+pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
+  dotenvy::dotenv().ok();
+  let url = std::env::var("DATABASE_URL").map_err(|_| FlowError::Other("DATABASE_URL not set".into()))?;
+  DieselFlowRepository::new_pg(&url)
+}
+#[cfg(all(not(feature = "postgres"), not(test)))]
 pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
   dotenvy::dotenv().ok();
   let url = std::env::var("DATABASE_URL").map_err(|_| FlowError::Other("DATABASE_URL not set".into()))?;
   let url_l = url.to_lowercase();
-  if url_l.starts_with("file:") || url_l.contains("mode=memory") || url_l.contains("sqlite") {
+  if url_l.contains("mode=memory") {
+    return Err(FlowError::Other("chem-persistence: in-memory sqlite URLs are not supported; provide a file-backed path"
+                                               .into()));
+  }
+  if url_l.starts_with("file:") || url_l.contains("sqlite") {
     let repo = DieselFlowRepository::new(&url);
     return Ok(repo);
   }
@@ -132,24 +185,26 @@ pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
                         production"
                                    .into()))
 }
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(all(test, not(feature = "sqlite"), not(feature = "postgres")))]
+pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
+  dotenvy::dotenv().ok();
+  let url = std::env::var("DATABASE_URL").map_err(|_| FlowError::Other("DATABASE_URL not set".into()))?;
+  let url_l = url.to_lowercase();
+  if url_l.contains("mode=memory") {
+    return Err(FlowError::Other("chem-persistence: in-memory sqlite URLs are not supported; provide a file-backed path".into()));
+  }
+  if url_l.starts_with("file:") || url_l.contains("sqlite") {
+    return DieselFlowRepository::try_new(&url);
+  }
+  Err(FlowError::Other("chem-persistence requires either the 'postgres' or 'sqlite' feature".into()))
+}
+#[cfg(feature = "postgres")]
 impl DieselFlowRepository {
   pub fn new_pg(database_url: &str) -> FlowResult<DieselFlowRepository> {
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = Pool::builder().build(manager)
                               .map_err(|e| FlowError::Storage(format!("no se pudo crear el pool de conexiones: {}", e)))?;
-    let snapshot_dir = std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string());
-    let artifact_dir = std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string());
-    fs::create_dir_all(&snapshot_dir).ok();
-    fs::create_dir_all(&artifact_dir).ok();
-    let repo = DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir };
-    if let Ok(mut c) = repo.conn_raw() {
-      match c.run_pending_migrations(MIGRATIONS) {
-        Ok(applied) => eprintln!("chem-persistence (pg): aplicadas {} migraciones embebidas", applied.len()),
-        Err(e) => eprintln!("chem-persistence (pg): fallo al ejecutar migraciones embebidas: {}", e),
-      }
-    }
-    Ok(repo)
+    DieselFlowRepository::new_with_pool(pool)
   }
   pub fn new_pg_from_env() -> FlowResult<DieselFlowRepository> {
     dotenvy::dotenv().ok();
@@ -165,7 +220,7 @@ impl FlowRepository for DieselFlowRepository {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
-    let row = map_db_err(flows.filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
+    let row = map_db_err(flows.select(FlowRow::as_select()).filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
     Ok(FlowMeta { id: Uuid::parse_str(&row.id).unwrap(),
                   name: row.name,
                   status: row.status,
@@ -179,7 +234,7 @@ impl FlowRepository for DieselFlowRepository {
   }
   fn dump_tables_for_debug(&self) -> FlowResult<(Vec<FlowMeta>, Vec<FlowData>)> {
     let mut conn = self.conn()?;
-    let frows = map_db_err(flows_dsl::flows.load::<FlowRow>(&mut conn))?;
+    let frows = map_db_err(flows_dsl::flows.select(FlowRow::as_select()).load::<FlowRow>(&mut conn))?;
     let mut flows_out = Vec::new();
     for r in frows {
       flows_out.push(FlowMeta { id: Uuid::parse_str(&r.id).unwrap(),
@@ -349,7 +404,8 @@ impl FlowRepository for DieselFlowRepository {
           //el nombre y status de la nueva rama son los mismos que los del padre el
           // nombre_branch para eso consultamos al padre y verificamos su nombre
           // y status y que exista
-          let parent_flow = flows_dsl::flows.filter(flows_dsl::id.eq(&parent_id_s)).first::<FlowRow>(conn)?;
+          let parent_flow =
+            flows_dsl::flows.select(FlowRow::as_select()).filter(flows_dsl::id.eq(&parent_id_s)).first::<FlowRow>(conn)?;
           let status_in = parent_flow.status;
           let name_in = parent_flow.name.map(|n| format!("{}_branch", n)).or(Some("branch".into()));
           let new = FlowRow { id: new_id.to_string(),
@@ -397,8 +453,8 @@ impl FlowRepository for DieselFlowRepository {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
-    let row_opt = flows.filter(id.eq(&fid))
-                       .select(status)
+    let row_opt = flows.select(status)
+                       .filter(id.eq(&fid))
                        .first::<Option<String>>(&mut conn)
                        .optional()
                        .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
@@ -408,8 +464,8 @@ impl FlowRepository for DieselFlowRepository {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
-    let row = flows.filter(id.eq(&fid))
-                   .select(metadata)
+    let row = flows.select(metadata)
+                   .filter(id.eq(&fid))
                    .first::<String>(&mut conn)
                    .optional()
                    .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
@@ -426,8 +482,8 @@ impl FlowRepository for DieselFlowRepository {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     // Read current metadata
-    let current = flows.filter(id.eq(&fid))
-                       .select(metadata)
+    let current = flows.select(metadata)
+                       .filter(id.eq(&fid))
                        .first::<String>(&mut conn)
                        .optional()
                        .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
@@ -451,8 +507,8 @@ impl FlowRepository for DieselFlowRepository {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
-    let current = flows.filter(id.eq(&fid))
-                       .select(metadata)
+    let current = flows.select(metadata)
+                       .filter(id.eq(&fid))
                        .first::<String>(&mut conn)
                        .optional()
                        .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
@@ -474,7 +530,7 @@ impl FlowRepository for DieselFlowRepository {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     map_db_err(diesel::update(flows.filter(id.eq(&fid))).set(status.eq(new_status.clone())).execute(&mut conn))?;
-    let row = map_db_err(flows.filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
+    let row = map_db_err(flows.select(FlowRow::as_select()).filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
     Ok(FlowMeta { id: Uuid::parse_str(&row.id).unwrap(),
                   name: row.name,
                   status: row.status,
@@ -491,7 +547,8 @@ impl FlowRepository for DieselFlowRepository {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     // Obtener el current_cursor del flujo (si no existe devolvemos -1)
-    let parent_row = flows_dsl_local::flows.filter(flows_dsl_local::id.eq(&fid))
+    let parent_row = flows_dsl_local::flows.select(FlowRow::as_select())
+                                           .filter(flows_dsl_local::id.eq(&fid))
                                            .first::<FlowRow>(&mut conn)
                                            .optional()
                                            .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
@@ -555,9 +612,10 @@ impl FlowRepository for DieselFlowRepository {
       // Delete snapshots with cursor >= from_cursor
       diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid).and(schema::snapshots::dsl::cursor.ge(_from_cursor)))).execute(conn)?;
       // Update current_cursor to max remaining cursor or 0
-      let new_cursor_opt: Option<i64> = data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))
+      let new_cursor_opt: Option<i64> = data_dsl::flow_data
+        .filter(data_dsl::flow_id.eq(&fid))
         .select(diesel::dsl::max(data_dsl::cursor))
-        .first(conn)?;
+        .first::<Option<i64>>(conn)?;
       let new_cursor = new_cursor_opt.unwrap_or(0);
       diesel::update(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)))
         .set(flows_dsl::current_cursor.eq(new_cursor))
@@ -566,7 +624,8 @@ impl FlowRepository for DieselFlowRepository {
     }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))?;
     // Find child flows whose parent_cursor >= from_cursor and collect their ids
     let child_rows: Vec<FlowRow> =
-      map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
+      map_db_err(flows_dsl::flows.select(FlowRow::as_select())
+                                 .filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
                                                                   .and(flows_dsl::parent_cursor.ge(_from_cursor)))
                                  .load::<FlowRow>(&mut conn))?;
     // For each child, call delete_branch to remove subtree

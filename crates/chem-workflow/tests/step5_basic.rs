@@ -5,9 +5,7 @@ use chem_workflow::step::{StepContext, StepInfo};
 use flow::repository::FlowRepository; // trait for create_flow
 use flow::stubs::InMemoryFlowRepository;
 use std::sync::Arc;
-
-// This is a smoke test ensuring the Step5 compiles and can run minimal logic
-// with mocked prior steps.
+ 
 #[test]
 fn step5_smoke() {
   let flow_repo = Arc::new(InMemoryFlowRepository::new());

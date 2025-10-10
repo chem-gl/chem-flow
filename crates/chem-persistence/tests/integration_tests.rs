@@ -1,35 +1,39 @@
-#![cfg(not(feature = "pg"))]
+#![cfg(all(feature = "sqlite", not(feature = "postgres")))]
+use chem_persistence::test_helpers::create_temp_sqlite_db;
 use chem_persistence::DieselFlowRepository;
 use chrono::Utc;
 use flow::domain::FlowData;
 use flow::repository::FlowRepository;
 use serde_json::json;
+use std::path::PathBuf;
 use uuid::Uuid;
-// Cuando el crate se compila con la feature `pg`, el harness de tests puede
-// seguir siendo compilado como test de integración. Proporcionar dos variantes
-// `setup_repo` para que se use el constructor correcto dependiendo de la
-// feature habilitada.
-#[cfg(not(feature = "pg"))]
-fn setup_repo() -> DieselFlowRepository {
-  // Usar una base en memoria con nombre único por test para aislarlos
-  // y evitar bloqueos entre pruebas que puedan correr en paralelo.
-  let url = format!("file:memdb_{}?mode=memory&cache=shared", Uuid::new_v4());
-  std::env::set_var("DATABASE_URL", &url);
-  DieselFlowRepository::new(&url)
+struct FlowRepoTestContext {
+  snapshot_dir: PathBuf,
+  artifact_dir: PathBuf,
 }
-#[cfg(feature = "pg")]
-fn setup_repo() -> DieselFlowRepository {
-  // Para builds con feature `pg`, intentar usar el constructor PG. El runner de
-  // tests debe establecer una DATABASE_URL real apuntando a una instancia de
-  // Postgres de test. Si no se establece, `new_pg` retornará un Err y el test
-  // fallará rápido con un mensaje útil.
-  dotenvy::dotenv().ok();
-  let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for pg tests");
-  DieselFlowRepository::new_pg(&url).expect("create pg repo")
+
+impl Drop for FlowRepoTestContext {
+  fn drop(&mut self) {
+    let _ = std::fs::remove_dir_all(&self.snapshot_dir);
+    let _ = std::fs::remove_dir_all(&self.artifact_dir);
+  }
+}
+
+fn setup_repo() -> (DieselFlowRepository, FlowRepoTestContext) {
+  let db = create_temp_sqlite_db().expect("failed to create sqlite db");
+  let snapshot_dir = std::env::temp_dir().join(format!("chemflow_snapshots_{}", Uuid::new_v4()));
+  let artifact_dir = std::env::temp_dir().join(format!("chemflow_artifacts_{}", Uuid::new_v4()));
+  let repo =
+    DieselFlowRepository::with_pool_and_dirs(db.pool.clone(),
+                                             snapshot_dir.to_string_lossy().into_owned(),
+                                             artifact_dir.to_string_lossy().into_owned()).expect("failed to initialize \
+                                                                                                  repo");
+  let ctx = FlowRepoTestContext { snapshot_dir, artifact_dir };
+  (repo, ctx)
 }
 #[test]
 fn test_create_and_persist_flow_data_and_branching() {
-  let repo = setup_repo();
+  let (repo, _ctx) = setup_repo();
   let flow_id = repo.create_flow(Some("mi-flow".into()), Some("running".into()), json!({"k":"v"})).expect("create");
   assert!(repo.branch_exists(&flow_id).unwrap());
   // persist some steps
@@ -43,7 +47,7 @@ fn test_create_and_persist_flow_data_and_branching() {
                         metadata: json!({}),
                         command_id: None,
                         created_at: now };
-    let res = repo.persist_data(&fd, (i - 1) as i64).expect("persist");
+    let res = repo.persist_data(&fd, i - 1).expect("persist");
     match res {
       flow::domain::PersistResult::Ok { new_version } => assert!(new_version >= 1),
       flow::domain::PersistResult::Conflict => panic!("conflict"),
@@ -53,7 +57,7 @@ fn test_create_and_persist_flow_data_and_branching() {
   let items = repo.read_data(&flow_id, 0).expect("read");
   assert_eq!(items.len(), 3);
   // crear rama en cursor 2
-  let branch_id = repo.create_branch(&flow_id, Some("rama".into()), None, 2, json!({})).expect("branch");
+  let branch_id = repo.create_branch(&flow_id, 2, json!({})).expect("branch");
   assert!(repo.branch_exists(&branch_id).unwrap());
   // Verificar que la rama guarda parent_flow_id correctamente
   let meta = repo.get_flow_meta(&branch_id).expect("get meta");
@@ -62,8 +66,7 @@ fn test_create_and_persist_flow_data_and_branching() {
   let count = repo.count_steps(&branch_id).expect("count");
   assert_eq!(count, 2);
   // --- crear y eliminar rama temporal ---
-  let temp_branch =
-    repo.create_branch(&flow_id, Some("temp-branch".into()), Some("queued".into()), 2, json!({})).expect("create temp");
+  let temp_branch = repo.create_branch(&flow_id, 2, json!({})).expect("create temp");
   assert!(repo.branch_exists(&temp_branch).unwrap());
   // Añadir un paso para tener datos
   let now = Utc::now();
@@ -96,7 +99,7 @@ fn test_create_and_persist_flow_data_and_branching() {
 }
 #[test]
 fn child_preserves_steps_after_parent_deletion_sqlite() {
-  let repo = setup_repo();
+  let (repo, _ctx) = setup_repo();
   let parent = repo.create_flow(Some("parent-sql".into()), None, json!({"p":"v"})).expect("create");
   // add steps
   let mut expected = 0i64;
@@ -115,8 +118,7 @@ fn child_preserves_steps_after_parent_deletion_sqlite() {
     }
   }
   // create child clone
-  let child = repo.create_branch(&parent, Some("child-sql".into()), None, 5, json!({})).expect("branch");
-  #[cfg(not(feature = "pg"))]
+  let child = repo.create_branch(&parent, 5, json!({})).expect("branch");
   assert_eq!(repo.count_steps(&child).unwrap(), 5);
   // delete parent; child should remain with its cloned steps
   repo.delete_branch(&parent).expect("delete parent");

@@ -1,13 +1,47 @@
 // molecule.rs
 use crate::DomainError;
-use chem_providers::ChemEngine;
+use chem_providers::{ChemEngine, ChemEngineInterface};
 use chrono::Utc;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+#[cfg(not(any(test, feature = "mock_rdkit")))]
 static ENGINE: Lazy<Result<ChemEngine, DomainError>> = Lazy::new(|| {
   ChemEngine::init().map_err(|e| DomainError::ExternalError(format!("Error al inicializar el motor químico: {}", e)))
+});
+
+#[cfg(any(test, feature = "mock_rdkit"))]
+static ENGINE: Lazy<Result<Box<dyn ChemEngineInterface>, DomainError>> = Lazy::new(|| {
+  // Use the mock engine for tests
+  let engine = {
+    #[cfg(feature = "mock_rdkit")]
+    {
+      // Create a mock implementation
+      let mut mock = chem_providers::MockChemEngineInterface::new();
+
+      // Configure the mock to return predictable responses
+      mock.expect_get_molecule().returning(|smiles| {
+                                  Ok(chem_providers::Molecule { inchikey: format!("MOCK-{}-ABCDEFGHIJ-P", smiles),
+                                                                inchi: format!("InChI=MOCK/{}", smiles),
+                                                                smiles: smiles.to_string(),
+                                                                num_atoms: (smiles.len() as u32).max(1),
+                                                                mol_weight: 12.01 * (smiles.len() as f64).max(1.0),
+                                                                mol_formula: format!("C{}", smiles.len().max(1)),
+                                                                structure: None })
+                                });
+
+      mock
+    }
+
+    #[cfg(not(feature = "mock_rdkit"))]
+    {
+      // Fall back to regular implementation if mock_rdkit isn't enabled
+      ChemEngine::init().map_err(|e| DomainError::ExternalError(format!("Error al inicializar el motor químico: {}", e)))?
+    }
+  };
+
+  Ok(Box::new(engine))
 });
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -57,9 +91,25 @@ impl Molecule {
     if smiles.trim().is_empty() {
       return Err(DomainError::ValidationError("SMILES de entrada no puede estar vacío".to_string()));
     }
-    let engine = ENGINE.as_ref().map_err(|e| e.clone())?;
-    let chem_molecule =
-      engine.get_molecule(smiles).map_err(|e| DomainError::ExternalError(format!("Error al procesar SMILES: {}", e)))?;
+
+    // Obtain molecule from the appropriate engine based on feature flags
+    let chem_molecule = {
+      #[cfg(not(any(test, feature = "mock_rdkit")))]
+      {
+        let engine: &ChemEngine = ENGINE.as_ref().map_err(|e| e.clone())?;
+        ChemEngineInterface::get_molecule(engine, smiles).map_err(|e| {
+                                                           DomainError::ExternalError(format!("Error al procesar SMILES: \
+                                                                                               {}",
+                                                                                              e))
+                                                         })?
+      }
+
+      #[cfg(any(test, feature = "mock_rdkit"))]
+      {
+        let engine = ENGINE.as_ref().map_err(|e| e.clone())?;
+        engine.get_molecule(smiles).map_err(|e| DomainError::ExternalError(format!("Error al procesar SMILES: {}", e)))?
+      }
+    };
 
     // Base metadata
     let mut meta = serde_json::json!({

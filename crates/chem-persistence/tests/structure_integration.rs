@@ -1,13 +1,11 @@
+#![cfg(all(feature = "sqlite", not(feature = "postgres")))]
+
 use chem_domain::{DomainRepository, Molecule, MoleculeFamily};
 
 #[test]
 fn molecule_and_family_persist_structure() -> Result<(), Box<dyn std::error::Error>> {
-  // Create an in-memory sqlite-backed repo for testing when available,
-  // otherwise fall back to env-based constructor.
-  #[cfg(not(feature = "pg"))]
-  let repo = chem_persistence::new_sqlite_for_test()?;
-  #[cfg(feature = "pg")]
-  let repo = chem_persistence::new_domain_repo_from_env()?;
+  // Create a temporary sqlite-backed repo for testing.
+  let (repo, _db_guard) = chem_persistence::new_sqlite_for_test()?;
 
   // Create a molecule from SMILES (requires Python/RDKit available)
   let mol = Molecule::from_smiles("CCO")?; // ethanol

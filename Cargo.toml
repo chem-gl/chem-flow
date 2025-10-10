@@ -21,6 +21,9 @@ sha2 = "0.10"
 chem-domain = { path = "crates/chem-domain" }
 flow = { path = "crates/flow" }
 chem-persistence = { path = "crates/chem-persistence" }
+chem-providers = { path = "crates/chem-providers" }
+chem-workflow = { path = "crates/chem-workflow" }
+chem-utils = { path = "crates/chem-utils" }
 postgres = "0.19"
 
 [dev-dependencies]
@@ -37,14 +40,22 @@ members = [
   "crates/flow",
   "crates/chem-persistence",
   "crates/chem-providers",
-  "crates/chem-workflow"
+  "crates/chem-workflow",
+  "crates/chem-utils"
 ]
 [patch.crates-io]
 pyo3 = { git = "https://github.com/PyO3/pyo3", tag = "v0.26.0" }
 [features]
-# Enable Postgres demo by default so the default `main-core` binary
-# is compiled to use Postgres. Production builds that don't want Postgres
-# can opt out or the feature can be removed in CI as needed.
-default = ["pg_demo"]
-# Habilita el ejemplo de persistencia en Postgres desde main.rs
+# Por defecto no activamos Postgres para que los tests usen SQLite o in-memory
+default = []
+# Habilita el ejemplo/demostración con Postgres (producción/examples)
 pg_demo = ["chem-persistence/pg"]
+# Selección explícita de backends de persistencia
+# - Tests: habilitar `sqlite`
+# - Producción/examples: habilitar `postgres` o `pg_demo`
+sqlite = ["chem-persistence/sqlite"]
+postgres = ["chem-persistence/postgres"]
+# Feature para ejecutar tests con mocks (sin RDKit real)
+mock_rdkit = ["chem-domain/mock_rdkit", "chem-providers/mock_rdkit", "chem-persistence/mock_rdkit", "chem-workflow/mock_rdkit", "chem-utils/mock_rdkit"]
+# Feature para utilidades de testing (activa SQLite en chem-persistence)
+testing = ["chem-persistence/testing", "chem-utils/testing"]

@@ -1,0 +1,20 @@
+[package]
+name = "chem-utils"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+mock_rdkit = ["chem-providers/mock_rdkit"]
+testing = ["mock_rdkit", "tempfile"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+thiserror = "2.0"
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = { version = "3.10", optional = true }
+mockall = "0.11"
+chem-providers = { path = "../chem-providers" }
+chem-domain = { path = "../chem-domain" }

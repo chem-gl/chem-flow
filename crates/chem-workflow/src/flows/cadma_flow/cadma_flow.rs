@@ -5,7 +5,10 @@
 // parte de la lógica común al trait `ChemicalFlowEngine` mediante la
 // macro `impl_chemical_flow!`.
 use crate::{
-  flows::cadma_flow::steps::{ADMETSAInitialStep4, ADMETSAPropertiesStep2, FamilyReferenceStep1, MoleculeInitialStep3},
+  flows::cadma_flow::steps::{
+    ADMETSAGeneratedStep6, ADMETSAInitialStep4, ADMETSAPropertiesStep2, FamilyReferenceStep1, MoleculeInitialStep3,
+    SubstituteGenerationStep5,
+  },
   workflow_type::WorkflowType,
 };
 use chem_domain::DomainRepository;
@@ -44,5 +47,10 @@ crate::impl_chemical_flow!(
   CadmaFlow,
   CadmaState,
   WorkflowType::Cadma,
-  { 0 => FamilyReferenceStep1, 1 => ADMETSAPropertiesStep2, 2 => MoleculeInitialStep3, 3 => ADMETSAInitialStep4 }
+  { 0 => FamilyReferenceStep1,
+    1 => ADMETSAPropertiesStep2,
+    2 => MoleculeInitialStep3,
+    3 => ADMETSAInitialStep4,
+    4 => SubstituteGenerationStep5,
+    5 => ADMETSAGeneratedStep6 }
 );

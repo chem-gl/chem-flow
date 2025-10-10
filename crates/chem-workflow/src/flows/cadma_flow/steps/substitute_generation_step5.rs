@@ -2,7 +2,7 @@ use crate::errors::WorkflowError;
 use crate::impl_workflow_step;
 use crate::step::StepContext;
 use chem_domain::{Molecule, MoleculeFamily};
-use chem_providers::ChemEngine;
+use chem_providers::{ChemEngine, ChemEngineInterface};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -102,8 +102,11 @@ impl SubstituteGenerationStep5 {
     for sm in substitute_family.molecules() {
       let smiles = sm.smiles().to_string();
       // Validar/canonizar con RDKit
-      let rd =
-        engine.get_molecule(&smiles).map_err(|e| WorkflowError::Other(format!("RDKit error substituyente: {}", e)))?;
+      let rd = ChemEngineInterface::get_molecule(&engine, &smiles).map_err(|e| {
+                                                                    WorkflowError::Other(format!("RDKit error \
+                                                                                                  substituyente: {}",
+                                                                                                 e))
+                                                                  })?;
       let key = rd.inchikey.clone();
       let rd_points = rd.structure.as_ref().map(|s| s.substitution_points.clone()).unwrap_or_default();
       let points = if let Some(ov) = sub_join_override.get(&key) { ov.clone() } else { rd_points };
@@ -126,8 +129,12 @@ impl SubstituteGenerationStep5 {
       };
       generated_for.push(ik.clone());
       let smiles_principal = mol.smiles().to_string();
-      let rd_p = engine.get_molecule(&smiles_principal)
-                       .map_err(|e| WorkflowError::Other(format!("RDKit error principal {}: {}", ik, e)))?;
+      let rd_p = ChemEngineInterface::get_molecule(&engine, &smiles_principal).map_err(|e| {
+                                                                                WorkflowError::Other(format!("RDKit error \
+                                                                                                              principal {}: \
+                                                                                                              {}",
+                                                                                                             ik, e))
+                                                                              })?;
       let default_points = rd_p.structure.as_ref().map(|s| s.substitution_points.clone()).unwrap_or_default();
       let principal_points = principal_override.get(ik).cloned().unwrap_or(default_points);
       if principal_points.is_empty() {
@@ -202,20 +209,28 @@ impl SubstituteGenerationStep5 {
                     break;
                   }
                   // Factibilidad previa: cargar RDKit dinámico de la cadena actual y sustituyente
-                  let sub_rd = engine.get_molecule(sub_mol.smiles())
+                  let sub_rd = ChemEngineInterface::get_molecule(&engine, sub_mol.smiles())
                                      .map_err(|e| WorkflowError::Other(format!("RDKit error sub: {}", e)))?;
                   let principal_rd =
-                    engine.get_molecule(&current_smiles).map_err(|e| {
+                    ChemEngineInterface::get_molecule(&engine, &current_smiles).map_err(|e| {
                                                            WorkflowError::Other(format!("RDKit error principal dinámico: \
                                                                                          {}",
                                                                                         e))
                                                          })?;
-                  if !engine.feasible_bond(&principal_rd, p_atom, &sub_rd, jp_atom, bond_order as u8) {
+                  if !ChemEngineInterface::feasible_bond(&engine, &principal_rd, p_atom, &sub_rd, jp_atom, bond_order as u8)
+                  {
                     valid_chain = false;
                     break;
                   }
-                  let fused = engine.fuse(&current_smiles, sub_rd.smiles.as_str(), p_atom, jp_atom, bond_order as u8)
-                                    .map_err(|e| WorkflowError::Other(format!("Fusión falló: {}", e)))?;
+                  let fused = ChemEngineInterface::fuse(&engine,
+                                                        &current_smiles,
+                                                        sub_rd.smiles.as_str(),
+                                                        p_atom,
+                                                        jp_atom,
+                                                        bond_order as u8).map_err(|e| {
+                                                                           WorkflowError::Other(format!("Fusión falló: {}",
+                                                                                                        e))
+                                                                         })?;
                   current_smiles = fused.smiles.clone();
                   used_inchikey = Some(fused.inchikey.clone());
                 }

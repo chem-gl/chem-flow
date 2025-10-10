@@ -576,6 +576,16 @@ fn list_families() -> Result<(), Box<dyn Error>> {
   Ok(())
 }
 
+fn list_flows() -> Result<(), Box<dyn Error>> {
+  let repo = new_flow_from_env()?;
+  let ids = repo.list_flow_ids()?;
+  println!("Flujos encontrados: {}", ids.len());
+  for id in ids {
+    println!(" - {} - {}", id, get_flow_name(&repo, &id));
+  }
+  Ok(())
+}
+
 /// Ver una molécula y sus propiedades almacenadas
 fn view_molecule() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
@@ -872,15 +882,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("4) Ejecutar Step1 (Family)");
     println!("5) Ejecutar Step2 (ADMETSA)");
     println!("6) Ejecutar Step3 (Molecule Initial)");
-    println!("10) Ejecutar Step4 (ADMETSA para molécula inicial)");
-    println!("11) Ejecutar Step5 (Generación de sustituciones)");
-    println!("12) Ejecutar Step6 (ADMETSA para generadas Step5)");
-    println!("7) Crear rama desde cursor especificado");
-    println!("8) Dump flow_data (registros persistidos)");
-    println!("9) Listar familias (dominio)");
-    println!("a) Crear molécula (persistir en dominio)");
-    println!("c) Ver molécula (detalle y propiedades)");
-    println!("b) Crear familia desde moléculas existentes en dominio");
+    println!("7) Ejecutar Step4 (ADMETSA para molécula inicial)");
+    println!("8) Ejecutar Step5 (Generación de sustituciones)");
+    println!("9) Ejecutar Step6 (ADMETSA para generadas Step5)");
+    println!("10) Crear rama desde cursor especificado");
+    println!("11) Dump flow_data (registros persistidos)");
+    println!("12) Listar familias (dominio)");
+    println!("13) Crear molécula (persistir en dominio)");
+    println!("14) Ver molécula (detalle y propiedades)");
+    println!("15) Crear familia desde moléculas existentes en dominio");
+    println!("16) Listar todos los flujos");
     println!("0) Guardar snapshot");
     println!("q) Salir");
 
@@ -932,7 +943,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "10" => {
+      "7" => {
         if let Some(engine) = maybe_engine.as_mut() {
           if let Err(e) = run_step4(engine) {
             println!("Error en Step4: {}", e);
@@ -941,7 +952,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "11" => {
+      "8" => {
         if let Some(engine) = maybe_engine.as_mut() {
           if let Err(e) = run_step5(engine) {
             println!("Error en Step5: {}", e);
@@ -950,7 +961,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "12" => {
+      "9" => {
         if let Some(engine) = maybe_engine.as_mut() {
           if let Err(e) = run_step6(engine) {
             println!("Error en Step6: {}", e);
@@ -959,7 +970,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "7" => {
+      "10" => {
         if let Some(engine) = &maybe_engine {
           if let Err(e) = create_branch_from_engine(engine) {
             println!("Error creando rama: {}", e);
@@ -968,7 +979,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "8" => {
+      "11" => {
         if let Some(engine) = &maybe_engine {
           if let Err(e) = dump_flow_data(engine) {
             println!("Error volcando flow_data: {}", e);
@@ -977,12 +988,12 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("Carga o crea un flow primero.");
         }
       }
-      "9" => {
+      "12" => {
         if let Err(e) = list_families() {
           println!("Error listando familias: {}", e);
         }
       }
-      "a" => {
+      "13" => {
         // Crear molécula (persistir en dominio)
         let repo = match new_domain_from_env() {
           Ok(r) => r,
@@ -1004,14 +1015,13 @@ fn main() -> Result<(), Box<dyn Error>> {
           Err(e) => println!("Error creando molécula desde SMILES: {}", e),
         }
       }
-      "c" | "C" => {
+      "14" => {
         if let Err(e) = view_molecule() {
           println!("Error viendo molécula: {}", e);
         }
       }
-      "b" => {
-        // Crear familia dneradas 1 moléculas usando método Manual"esde moléculas
-        // existentes en dominio
+      "15" => {
+        // Crear familia desde moléculas existentes en dominio
         let repo = match new_domain_from_env() {
           Ok(r) => r,
           Err(e) => {
@@ -1042,6 +1052,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         match repo.save_family(fam) {
           Ok(id) => println!("Familia creada con id: {}", id),
           Err(e) => println!("Error guardando familia: {}", e),
+        }
+      }
+      "16" => {
+        if let Err(e) = list_flows() {
+          println!("Error listando flujos: {}", e);
         }
       }
       "0" => {

@@ -1,4 +1,5 @@
 // repository.rs
+use crate::db::run_migrations_on_pool;
 use crate::schema;
 use crate::schema::families::dsl as families_dsl;
 use crate::schema::family_members::dsl as fm_dsl;
@@ -9,21 +10,18 @@ use chem_domain::{DomainError, DomainRepository, Molecule, MoleculeFamily};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::Error as DieselError;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 // ...existing code...
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
-
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(feature = "postgres")]
 type DbPool = Pool<ConnectionManager<PgConnection>>;
-#[cfg(any(test, not(feature = "pg")))]
+#[cfg(not(feature = "postgres"))]
 type DbPool = Pool<ConnectionManager<SqliteConnection>>;
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(feature = "postgres")]
 type DbConn = PgConnection;
-#[cfg(any(test, not(feature = "pg")))]
+#[cfg(not(feature = "postgres"))]
 type DbConn = SqliteConnection;
 
 /// Repo Diesel que implementa `DomainRepository`.
@@ -32,7 +30,7 @@ pub struct DieselDomainRepository {
 }
 
 // Convenience constructors exposed by the crate root (lib.rs)
-#[cfg(all(feature = "pg", not(test)))]
+#[cfg(all(feature = "postgres", not(test)))]
 pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
   dotenvy::dotenv().ok();
   let url =
@@ -48,15 +46,34 @@ pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
   Ok(DieselDomainRepository::new(&url))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite", not(feature = "postgres")))]
+pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
+  use crate::test_helpers::{create_temp_sqlite_db, TestSqliteDb};
+  use once_cell::sync::Lazy;
+  use std::sync::Mutex;
+
+  static TEST_DBS: Lazy<Mutex<Vec<TestSqliteDb>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+  let db = create_temp_sqlite_db().map_err(|e| DomainError::ExternalError(format!("sqlite helper: {}", e)))?;
+  let repo = DieselDomainRepository::new_with_pool(db.pool.clone())?;
+  TEST_DBS.lock().expect("poisoned sqlite test db mutex").push(db);
+  Ok(repo)
+}
+
+#[cfg(all(test, feature = "postgres"))]
 pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
   dotenvy::dotenv().ok();
-  let url = std::env::var("CHEM_DB_URL").or_else(|_| std::env::var("DATABASE_URL"))
-                                        .unwrap_or_else(|_| "file:memdb1?mode=memory&cache=shared".into());
+  let url =
+    std::env::var("CHEM_DB_URL").or_else(|_| std::env::var("DATABASE_URL")).map_err(|_| {
+                                                                              DomainError::ExternalError("CHEM_DB_URL/\
+                                                                                                          DATABASE_URL not \
+                                                                                                          set"
+                                                                                                              .to_string())
+                                                                            })?;
   Ok(DieselDomainRepository::new(&url))
 }
 
-#[cfg(all(not(feature = "pg"), not(test)))]
+#[cfg(all(not(feature = "postgres"), not(test)))]
 pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
   dotenvy::dotenv().ok();
   let url =
@@ -67,10 +84,37 @@ pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
                                                                                                               .to_string())
                                                                             })?;
   let url_l = url.to_lowercase();
-  if url_l.starts_with("file:") || url_l.contains("mode=memory") || url_l.contains("sqlite") {
+  if url_l.contains("mode=memory") {
+    return Err(DomainError::ExternalError("chem-persistence: in-memory sqlite URLs are not supported; provide a \
+                                           file-backed path"
+                                                            .to_string()));
+  }
+  if url_l.starts_with("file:") || url_l.contains("sqlite") {
     return Ok(DieselDomainRepository::new(&url));
   }
   Err(DomainError::ExternalError("chem-persistence was compiled without 'pg' feature; enable 'pg' to use Postgres".to_string()))
+}
+
+#[cfg(all(test, not(feature = "sqlite"), not(feature = "postgres")))]
+pub fn new_from_env() -> Result<DieselDomainRepository, DomainError> {
+  dotenvy::dotenv().ok();
+  let url =
+    std::env::var("CHEM_DB_URL").or_else(|_| std::env::var("DATABASE_URL")).map_err(|_| {
+                                                                              DomainError::ExternalError("CHEM_DB_URL/\
+                                                                                                          DATABASE_URL not \
+                                                                                                          set"
+                                                                                                              .to_string())
+                                                                            })?;
+  let url_l = url.to_lowercase();
+  if url_l.contains("mode=memory") {
+    return Err(DomainError::ExternalError("chem-persistence: in-memory sqlite URLs are not supported; provide a \
+                                           file-backed path"
+                                                            .to_string()));
+  }
+  if url_l.starts_with("file:") || url_l.contains("sqlite") {
+    return Ok(DieselDomainRepository::new(&url));
+  }
+  Err(DomainError::ExternalError("chem-persistence requires either the 'postgres' or 'sqlite' feature".to_string()))
 }
 
 /// Helper that returns a repo created from environment and boxed as trait
@@ -79,34 +123,44 @@ pub fn new_domain_repo_from_env() -> Result<DieselDomainRepository, DomainError>
   new_from_env()
 }
 
-#[cfg(not(feature = "pg"))]
-pub fn new_sqlite_for_test() -> Result<DieselDomainRepository, DomainError> {
-  // Provide a convenience wrapper for tests that expect a sqlite-backed repo
-  let url = std::env::var("CHEM_DB_URL").unwrap_or_else(|_| "file:memdb1?mode=memory&cache=shared".into());
-  Ok(DieselDomainRepository::new(&url))
+#[cfg(all(feature = "sqlite", not(feature = "postgres")))]
+pub fn new_sqlite_for_test() -> Result<(DieselDomainRepository, crate::test_helpers::TestSqliteDb), DomainError> {
+  use crate::test_helpers::{create_temp_sqlite_db, TestSqliteDb};
+
+  let db: TestSqliteDb = create_temp_sqlite_db().map_err(|e| DomainError::ExternalError(format!("sqlite helper: {}", e)))?;
+  let repo = DieselDomainRepository::new_with_pool(db.pool.clone())?;
+  Ok((repo, db))
 }
 
 impl DieselDomainRepository {
   pub fn new(database_url: &str) -> Self {
-    #[cfg(any(test, not(feature = "pg")))]
+    #[cfg(not(feature = "postgres"))]
     let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-    #[cfg(all(feature = "pg", not(test)))]
+    #[cfg(feature = "postgres")]
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     let pool = Pool::builder().max_size(4).build(manager).expect("no se pudo crear el pool de conexiones");
-    let repo = DieselDomainRepository { pool: Arc::new(pool) };
-    if let Ok(mut c) = repo.conn_raw() {
-      #[cfg(any(test, not(feature = "pg")))]
-      {
-        let _ = diesel::sql_query("PRAGMA journal_mode = WAL;").execute(&mut c);
-        let _ = diesel::sql_query("PRAGMA busy_timeout = 5000;").execute(&mut c);
-      }
-      let _ = c.run_pending_migrations(MIGRATIONS);
-    }
-    repo
+    DieselDomainRepository::new_with_pool(pool).expect("failed to initialize DieselDomainRepository")
+  }
+
+  pub fn new_with_pool(pool: DbPool) -> Result<Self, DomainError> {
+    run_migrations_on_pool(&pool).map_err(|e| DomainError::ExternalError(format!("migrations: {}", e)))?;
+    Ok(DieselDomainRepository { pool: Arc::new(pool) })
+  }
+
+  pub fn pool(&self) -> Arc<DbPool> {
+    Arc::clone(&self.pool)
   }
 
   fn conn_raw(&self) -> std::result::Result<PooledConnection<ConnectionManager<DbConn>>, r2d2::Error> {
-    self.pool.get()
+    #[cfg_attr(feature = "postgres", allow(unused_mut))]
+    let mut conn = self.pool.get()?;
+    #[cfg(not(feature = "postgres"))]
+    {
+      use diesel::sql_query;
+      let _ = sql_query("PRAGMA journal_mode = WAL;").execute(&mut conn);
+      let _ = sql_query("PRAGMA busy_timeout = 5000;").execute(&mut conn);
+    }
+    Ok(conn)
   }
 
   fn conn(&self) -> Result<PooledConnection<ConnectionManager<DbConn>>, DomainError> {
@@ -236,7 +290,7 @@ impl DieselDomainRepository {
                                  frozen: family.is_frozen() };
 
     // Use Diesel's upsert: insert or update on conflict
-    #[cfg(feature = "pg")]
+    #[cfg(feature = "postgres")]
     {
       map_db_err(diesel::insert_into(schema::families::table).values(&family_row)
                                                              .on_conflict(schema::families::id)
@@ -244,7 +298,7 @@ impl DieselDomainRepository {
                                                              .set(&family_row)
                                                              .execute(conn))?;
     }
-    #[cfg(not(feature = "pg"))]
+    #[cfg(not(feature = "postgres"))]
     {
       // For SQLite, use REPLACE (which deletes and inserts)
       map_db_err(diesel::replace_into(schema::families::table).values(&family_row).execute(conn))?;
@@ -260,14 +314,14 @@ impl DieselDomainRepository {
                              inchi: m.inchi().to_string(),
                              metadata: m.metadata().to_string(),
                              structure: m.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
-      #[cfg(feature = "pg")]
+      #[cfg(feature = "postgres")]
       {
         let _ = diesel::insert_into(schema::molecules::table).values(&mr)
                                                              .on_conflict(schema::molecules::inchikey)
                                                              .do_nothing()
                                                              .execute(conn);
       }
-      #[cfg(not(feature = "pg"))]
+      #[cfg(not(feature = "postgres"))]
       {
         // SQLite: ignore errors or use INSERT OR IGNORE
         let _ =
@@ -320,14 +374,14 @@ impl DomainRepository for DieselDomainRepository {
                            metadata: molecule.metadata().to_string(),
                            structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
 
-    #[cfg(feature = "pg")]
+    #[cfg(feature = "postgres")]
     {
       map_db_err(diesel::insert_into(schema::molecules::table).values(&mr)
                                                               .on_conflict(schema::molecules::inchikey)
                                                               .do_nothing()
                                                               .execute(&mut conn))?;
     }
-    #[cfg(not(feature = "pg"))]
+    #[cfg(not(feature = "postgres"))]
     {
       let res =
         diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, \
@@ -404,10 +458,9 @@ impl DomainRepository for DieselDomainRepository {
                                                       .into_iter()
                                                       .collect();
 
-    // Load all relevant molecules in one query
-    let molecule_rows: Vec<MoleculeRow> = if !all_inchikeys.is_empty() {
+    let molecule_rows = if !all_inchikeys.is_empty() {
       molecules_dsl::molecules.filter(molecules_dsl::inchikey.eq_any(&all_inchikeys))
-                              .load(&mut conn)
+                              .load::<MoleculeRow>(&mut conn)
                               .map_err(|e| DomainError::ExternalError(format!("db: {}", e)))?
     } else {
       Vec::new()
@@ -598,7 +651,7 @@ impl DomainRepository for DieselDomainRepository {
                                  inchi: molecule.inchi().to_string(),
                                  metadata: molecule.metadata().to_string(),
                                  structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
-          #[cfg(feature = "pg")]
+          #[cfg(feature = "postgres")]
           {
             map_db_err(
                     diesel::insert_into(schema::molecules::table)
@@ -608,7 +661,7 @@ impl DomainRepository for DieselDomainRepository {
                         .execute(conn),
                 ).map_err(|_| diesel::result::Error::RollbackTransaction)?;
           }
-          #[cfg(not(feature = "pg"))]
+          #[cfg(not(feature = "postgres"))]
           {
             map_db_err(diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, ?, ?, ?)")
                                                     .bind::<diesel::sql_types::Text, _>(mr.inchikey)

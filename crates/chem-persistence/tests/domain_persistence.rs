@@ -1,23 +1,13 @@
+#![cfg(all(feature = "sqlite", not(feature = "postgres")))]
+
 use chem_domain::{DomainError, DomainRepository, Molecule, MoleculeFamily};
-use chem_persistence::new_domain_repo_from_env;
+use chem_persistence::test_helpers::create_temp_sqlite_db;
+use chem_persistence::DieselDomainRepository;
 use serde_json::json;
-use uuid::Uuid;
 #[test]
 fn diesel_domain_persistence_family_lifecycle() {
-  // Use a temporary file-backed SQLite DB for tests to avoid URI parsing
-  // options problems with different sqlite builds.
-  let tmp_path = std::env::temp_dir().join(format!("chem_test_{}.db", Uuid::new_v4()));
-  let db_url = tmp_path.to_str().unwrap().to_string();
-  std::env::set_var("CHEM_DB_URL", &db_url);
-  // If crate was built with the `pg` feature, skip this sqlite-only test at
-  // runtime.
-  if cfg!(feature = "pg") {
-    eprintln!("skipping sqlite-only persistence test because 'pg' feature is enabled");
-    return;
-  }
-  // Create repo from environment (the CHEM_DB_URL we set above). When
-  // compiled without `pg` this will use SQLite.
-  let repo = new_domain_repo_from_env().expect("failed to create repo");
+  let test_db = create_temp_sqlite_db().expect("failed to create sqlite db");
+  let repo = DieselDomainRepository::new_with_pool(test_db.pool.clone()).expect("failed to initialize repo");
   // Create two molecules
   // Use valid InChIKey-like strings: 14chars-10chars-1char (total 27 chars)
   let m1 = Molecule::from_parts("ABCDEFGHIJKLMN-OPQRSTUVWX-1",
@@ -57,6 +47,4 @@ fn diesel_domain_persistence_family_lifecycle() {
   // Ensure family id3 no longer exists
   let got = repo.get_family(&id3).expect("get family");
   assert!(got.is_none(), "family should have been deleted");
-  // Cleanup temporary DB file
-  let _ = std::fs::remove_file(tmp_path);
 }
