@@ -384,22 +384,37 @@ impl FlowRepository for InMemoryFlowRepository {
     let flows = self.lock(&self.flows)?;
     Ok(flows.keys().cloned().collect())
   }
-  /// Elimina una rama pero NO borra sus hijos.
+  /// Elimina una rama y todas sus subramas (recursivo).
   ///
-  /// Nuevo comportamiento: cuando se elimina una rama/flow, los hijos que
-  /// tenían `parent_flow_id` apuntando a ésta pasan a quedar huérfanos;
-  /// es decir, se actualiza su `parent_flow_id` y `parent_cursor` a `None`
-  /// y se dejan como ramas principales. Sólo se eliminan la metadata,
-  /// los pasos y snapshots del flow solicitado.
+  /// Comportamiento: primero elimina las ramas hijas cuyo `parent_flow_id`
+  /// sea el `flow_id` indicado (recursivamente), y luego elimina el propio
+  /// flujo (metadata, steps y snapshots).
   fn delete_branch(&self, flow_id: &Uuid) -> Result<()> {
-    // verify exists
-    {
+    // verificar existencia y recolectar hijos antes de mutar
+    let child_ids: Vec<Uuid> = {
       let flows = self.lock(&self.flows)?;
       if !flows.contains_key(flow_id) {
         return Err(FlowError::NotFound(format!("flow {}", flow_id)));
       }
+      flows.values()
+           .filter_map(|fm| {
+             if let Some(p) = fm.parent_flow_id {
+               if &p == flow_id {
+                 Some(fm.id)
+               } else {
+                 None
+               }
+             } else {
+               None
+             }
+           })
+           .collect()
+    };
+    // eliminar hijos recursivamente
+    for cid in child_ids {
+      self.delete_branch(&cid)?;
     }
-    // remove the flow's metadata, steps and snapshots
+    // eliminar este flujo: metadata, steps y snapshots
     let mut flows = self.lock(&self.flows)?;
     let mut steps = self.lock(&self.steps)?;
     let mut snaps = self.lock(&self.snapshots)?;
@@ -408,16 +423,6 @@ impl FlowRepository for InMemoryFlowRepository {
     let keys: Vec<Uuid> = snaps.iter().filter(|(_, s)| s.flow_id == *flow_id).map(|(k, _)| *k).collect();
     for k in keys {
       snaps.remove(&k);
-    }
-    // Hijos huérfanos: encontrar flujos cuyo `parent_flow_id` == flow_id y
-    // actualizar sus campos para que no apunten al padre borrado.
-    for (_, meta) in flows.iter_mut() {
-      if let Some(parent) = meta.parent_flow_id {
-        if parent == *flow_id {
-          meta.parent_flow_id = None;
-          meta.parent_cursor = None;
-        }
-      }
     }
     Ok(())
   }

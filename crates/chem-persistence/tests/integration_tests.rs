@@ -128,3 +128,40 @@ fn child_preserves_steps_after_parent_deletion_sqlite() {
   let items = repo.read_data(&child, 0).expect("read child");
   assert_eq!(items[0].metadata["m"].as_i64().unwrap(), 1);
 }
+
+#[test]
+fn delete_from_step_cascades_children_and_truncates_parent_sqlite() {
+  let (repo, _ctx) = setup_repo();
+  // Create parent and add 5 steps
+  let parent = repo.create_flow(Some("parent-del".into()), None, json!({"p":"v"})).expect("create");
+  let mut expected = 0i64;
+  for i in 1..=5 {
+    let fd = FlowData { id: Uuid::new_v4(),
+                        flow_id: parent,
+                        cursor: i,
+                        key: "Step".into(),
+                        payload: json!({"v": i}),
+                        metadata: json!({"m": i}),
+                        command_id: None,
+                        created_at: Utc::now() };
+    match repo.persist_data(&fd, expected).expect("persist") {
+      flow::domain::PersistResult::Ok { new_version } => expected = new_version,
+      _ => panic!("persist failed"),
+    }
+  }
+  // Create two children at different parent_cursor positions
+  let child_a = repo.create_branch(&parent, 3, json!({"branch":"a"})).expect("branch a");
+  let child_b = repo.create_branch(&parent, 5, json!({"branch":"b"})).expect("branch b");
+  assert_eq!(repo.count_steps(&child_a).unwrap(), 3);
+  assert_eq!(repo.count_steps(&child_b).unwrap(), 5);
+  // Delete from step 4 on the parent: should remove parent steps >=4 and delete
+  // child_b (parent_cursor=5)
+  repo.delete_from_step(&parent, 4).expect("delete_from_step");
+  // Parent now has 3 steps
+  assert_eq!(repo.count_steps(&parent).unwrap(), 3);
+  // child_a (parent_cursor=3) should remain
+  assert!(repo.branch_exists(&child_a).unwrap());
+  assert_eq!(repo.count_steps(&child_a).unwrap(), 3);
+  // child_b (parent_cursor=5) should be deleted
+  assert!(!repo.branch_exists(&child_b).unwrap());
+}

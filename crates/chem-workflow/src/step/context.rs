@@ -57,6 +57,17 @@ impl StepContext {
     use chrono::Utc;
     use flow::domain::FlowData;
     let key = key_for_step_state(step_name);
+    // Guardar sin duplicaciones globales: buscar si existe un payload idéntico
+    // para este step_name en cualquier cursor del flujo actual. Si existe,
+    // retornamos Ok con la versión actual sin insertar.
+    {
+      let existing = self.flow_repo.read_data(&self.flow_id, 0)?;
+      if existing.iter().any(|fd| fd.key.eq_ignore_ascii_case(&key) && fd.payload == info.payload) {
+        // no insertar duplicados
+        let meta = self.flow_repo.get_flow_meta(&self.flow_id)?;
+        return Ok(PersistResult::Ok { new_version: meta.current_version });
+      }
+    }
     // Determinar cursor y versión
     let (cursor_candidate, ev) = self.flow_repo
                                      .get_flow_meta(&self.flow_id)

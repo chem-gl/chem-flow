@@ -578,15 +578,18 @@ impl FlowRepository for DieselFlowRepository {
   fn delete_branch(&self, flow_id: &Uuid) -> FlowResult<()> {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
+    // Importante: NO eliminar ramas hijas al borrar una rama padre.
+    // Las ramas son clones independientes a partir de parent_cursor, por lo que
+    // deben preservarse aunque se elimine el padre. Solo se eliminan los datos
+    // del flujo indicado.
+    // ahora eliminar datos, snapshots y metadata del flujo
     conn.transaction::<(), diesel::result::Error, _>(|conn| {
-            diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
-            diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
-            diesel::update(flows_dsl::flows.filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))))
-                .set((flows_dsl::parent_flow_id.eq::<Option<String>>(None), flows_dsl::parent_cursor.eq::<Option<i64>>(None)))
-                .execute(conn)?;
-            diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
-            Ok(())
-        }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
+          diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
+          Ok(())
+        })
+        .map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
   }
   fn delete_from_step(&self, _flow_id: &Uuid, _from_cursor: i64) -> FlowResult<()> {
     // Behavior:
