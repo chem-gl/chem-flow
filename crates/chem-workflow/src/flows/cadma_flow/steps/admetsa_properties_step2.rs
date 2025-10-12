@@ -3,7 +3,8 @@
 //! creada/seleccionada en Step1.
 //! - Soporta "method_property_map" y "preferred_methods".
 //! - Los valores manuales se pueden suministrar por SMILES.
-//! - Guarda cada propiedad mediante los ports del dominio como OwnedMolecularProperty.
+//! - Guarda cada propiedad mediante los ports del dominio como
+//!   OwnedMolecularProperty.
 
 use crate::errors::WorkflowError;
 use crate::flows::cadma_flow::steps::common::{

@@ -4,8 +4,8 @@
 //! - Ejecuta pasos interactivos (Step1, Step2)
 //! - Persiste resultados, guarda snapshots y maneja ramas
 //! - Listar / inspeccionar datos persistidos
-use chem_domain::{FamilyRepository, Molecule, MoleculeFamily, MoleculeReader, MoleculeWriter, PropertyRepository};
 use chem_domain::ports::ProviderMolecule;
+use chem_domain::{FamilyRepository, Molecule, MoleculeFamily, MoleculeReader, MoleculeWriter, PropertyRepository};
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
 use chem_providers::{ChemEngine, ChemEngineInterface};
 use chem_workflow::flows::cadma_flow::steps::admetsa_generated_step6::Step6Input;
@@ -31,18 +31,16 @@ use uuid::Uuid;
 fn molecule_from_smiles(smiles: &str) -> Result<Molecule, Box<dyn Error>> {
   let engine = ChemEngine::init()?;
   let provider_mol = engine.get_molecule(smiles)?;
-  
+
   // Convertir chem_providers::Molecule a ProviderMolecule
-  let converted = ProviderMolecule {
-    inchikey: provider_mol.inchikey,
-    inchi: provider_mol.inchi,
-    smiles: provider_mol.smiles.clone(),
-    num_atoms: provider_mol.num_atoms,
-    mol_weight: provider_mol.mol_weight,
-    mol_formula: provider_mol.mol_formula,
-    structure: None, // Por ahora sin estructura detallada
-  };
-  
+  let converted = ProviderMolecule { inchikey: provider_mol.inchikey,
+                                     inchi: provider_mol.inchi,
+                                     smiles: provider_mol.smiles.clone(),
+                                     num_atoms: provider_mol.num_atoms,
+                                     mol_weight: provider_mol.mol_weight,
+                                     mol_formula: provider_mol.mol_formula,
+                                     structure: None /* Por ahora sin estructura detallada */ };
+
   Ok(Molecule::from_provider_molecule(smiles, converted)?)
 }
 
