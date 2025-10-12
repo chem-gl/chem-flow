@@ -4,8 +4,10 @@
 //! - Ejecuta pasos interactivos (Step1, Step2)
 //! - Persiste resultados, guarda snapshots y maneja ramas
 //! - Listar / inspeccionar datos persistidos
-use chem_domain::{Molecule, MoleculeFamily};
+use chem_domain::{FamilyRepository, Molecule, MoleculeFamily, MoleculeReader, MoleculeWriter, PropertyRepository};
+use chem_domain::ports::ProviderMolecule;
 use chem_persistence::{new_domain_from_env, new_flow_from_env};
+use chem_providers::{ChemEngine, ChemEngineInterface};
 use chem_workflow::flows::cadma_flow::steps::admetsa_generated_step6::Step6Input;
 use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::{Step4Input, Step4Payload};
 use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Input;
@@ -24,6 +26,25 @@ use std::io::{self, Write};
 
 use std::sync::Arc;
 use uuid::Uuid;
+
+// Helper para crear moléculas desde SMILES usando el provider
+fn molecule_from_smiles(smiles: &str) -> Result<Molecule, Box<dyn Error>> {
+  let engine = ChemEngine::init()?;
+  let provider_mol = engine.get_molecule(smiles)?;
+  
+  // Convertir chem_providers::Molecule a ProviderMolecule
+  let converted = ProviderMolecule {
+    inchikey: provider_mol.inchikey,
+    inchi: provider_mol.inchi,
+    smiles: provider_mol.smiles.clone(),
+    num_atoms: provider_mol.num_atoms,
+    mol_weight: provider_mol.mol_weight,
+    mol_formula: provider_mol.mol_formula,
+    structure: None, // Por ahora sin estructura detallada
+  };
+  
+  Ok(Molecule::from_provider_molecule(smiles, converted)?)
+}
 
 fn prompt(msg: &str) -> Result<String, Box<dyn Error>> {
   print!("{}", msg);
@@ -109,7 +130,7 @@ fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     let smiles = prompt("SMILES (separados por coma): ")?;
     let mut mols = Vec::new();
     for s in smiles.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-      match Molecule::from_smiles(s) {
+      match molecule_from_smiles(s) {
         Ok(m) => mols.push(m),
         Err(e) => println!("SMILES inválido '{}': {}", s, e),
       }
@@ -151,7 +172,7 @@ fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     if !smiles.trim().is_empty() {
       let mut mols = Vec::new();
       for s in smiles.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        if let Ok(m) = Molecule::from_smiles(s) {
+        if let Ok(m) = molecule_from_smiles(s) {
           mols.push(m);
         } else {
           println!("SMILES inválido (ignorado): {}", s);
@@ -678,7 +699,7 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     let smiles_line = prompt("SMILES substituyentes (coma separados): ")?;
     let mut mols = Vec::new();
     for s in smiles_line.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-      match Molecule::from_smiles(s) {
+      match molecule_from_smiles(s) {
         Ok(m) => mols.push(m),
         Err(e) => println!("SMILES inválido '{}' ({}) ignorado", s, e),
       }
@@ -1007,7 +1028,7 @@ fn main() -> Result<(), Box<dyn Error>> {
           println!("SMILES vacío; abortando.");
           continue;
         }
-        match Molecule::from_smiles(&smiles) {
+        match molecule_from_smiles(&smiles) {
           Ok(m) => match repo.save_molecule(m.clone()) {
             Ok(key) => println!("Molécula creada y guardada con inchikey: {}", key),
             Err(e) => println!("Error guardando molécula: {}", e),
