@@ -45,6 +45,10 @@ members = [
 ]
 [patch.crates-io]
 pyo3 = { git = "https://github.com/PyO3/pyo3", tag = "v0.26.0" }
+[[example]]
+name = "example-domain"
+required-features = ["integration_examples"]
+
 [features]
 # Por defecto no activamos Postgres para que los tests usen SQLite o in-memory
 default = []
@@ -59,3 +63,5 @@ postgres = ["chem-persistence/postgres"]
 mock_rdkit = ["chem-domain/mock_rdkit", "chem-providers/mock_rdkit", "chem-persistence/mock_rdkit", "chem-workflow/mock_rdkit", "chem-utils/mock_rdkit"]
 # Feature para utilidades de testing (activa SQLite en chem-persistence)
 testing = ["chem-persistence/testing", "chem-utils/testing"]
+# Feature para ejemplos de integración (Phase 4)
+integration_examples = []

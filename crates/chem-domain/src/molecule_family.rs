@@ -23,7 +23,7 @@ impl MoleculeFamily {
   {
     let mut molecules: Vec<Molecule> = molecules.into_iter().collect();
     if molecules.is_empty() {
-      return Err(DomainError::ValidationError("Una familia molecular no puede estar vacía".to_string()));
+      return Err(DomainError::validation("MoleculeFamily", "Una familia molecular no puede estar vacía"));
     }
     let mut seen = HashSet::new();
     molecules.retain(|m| seen.insert(m.inchikey().to_string()));
@@ -57,7 +57,8 @@ impl MoleculeFamily {
 
   pub fn add_molecule(&self, molecule: Molecule) -> Result<Self, DomainError> {
     if self.molecules.iter().any(|m| m.inchikey() == molecule.inchikey()) {
-      return Err(DomainError::ValidationError(format!("Molécula ya existe en la familia: {}", molecule.inchikey())));
+      return Err(DomainError::validation("MoleculeFamily",
+                                         format!("Molécula ya existe en la familia: {}", molecule.inchikey())));
     }
     let mut new_molecules = self.molecules.clone();
     new_molecules.push(molecule);
@@ -74,7 +75,7 @@ impl MoleculeFamily {
   pub fn remove_molecule(&self, inchikey: &str) -> Result<Self, DomainError> {
     let new_molecules: Vec<Molecule> = self.molecules.iter().filter(|m| m.inchikey() != inchikey).cloned().collect();
     if new_molecules.is_empty() {
-      return Err(DomainError::ValidationError("No se puede eliminar la última molécula de la familia".to_string()));
+      return Err(DomainError::validation("MoleculeFamily", "No se puede eliminar la última molécula de la familia"));
     }
     let family_hash = Self::calculate_family_hash(&new_molecules);
     Ok(Self { id: Uuid::new_v4(),
@@ -182,8 +183,15 @@ mod tests {
 
   #[test]
   fn test_molecule_family_creation() -> Result<(), DomainError> {
-    let mol1 = Molecule::from_smiles("CCO")?;
-    let mol2 = Molecule::from_smiles("CCN")?;
+    // Use from_parts (Phase 2: no external dependencies)
+    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                    "CCO",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    json!({}))?;
+    let mol2 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-M",
+                                    "CCN",
+                                    "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                    json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     assert_eq!(family.len(), 2);
@@ -193,7 +201,10 @@ mod tests {
 
   #[test]
   fn test_molecule_family_duplicates() -> Result<(), DomainError> {
-    let mol = Molecule::from_smiles("CCO")?;
+    let mol = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                   "CCO",
+                                   "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                   json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol.clone(), mol], provenance)?;
     assert_eq!(family.len(), 1);

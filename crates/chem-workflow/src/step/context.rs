@@ -1,13 +1,13 @@
 // context.rs
 //
 // Provee `StepContext`, un helper ligero que facilita a los pasos
-// acceder a la persistencia (FlowRepository) y al DomainRepository.
+// acceder a la persistencia (FlowRepository) y a los ports del dominio.
 // Incluye utilidades para leer el último payload tipado y para
 // persistir resultados tipados de pasos.
 use crate::errors::WorkflowError;
 use crate::step::constants::key_for_step_state;
 use crate::step::StepInfo;
-use chem_domain::DomainRepository;
+use chem_domain::AllDomainPorts;
 use flow::domain::PersistResult;
 use flow::repository::FlowRepository;
 use serde::de::DeserializeOwned;
@@ -16,11 +16,11 @@ use uuid::Uuid;
 pub struct StepContext {
   pub flow_id: Uuid,
   pub flow_repo: Arc<dyn FlowRepository>,
-  pub domain_repo: Arc<dyn DomainRepository>,
+  pub domain_repo: Arc<dyn AllDomainPorts>,
 }
 impl StepContext {
   /// Crea un nuevo contexto para el flow indicado.
-  pub fn new(flow_id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn DomainRepository>) -> Self {
+  pub fn new(flow_id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn AllDomainPorts>) -> Self {
     Self { flow_id, flow_repo, domain_repo }
   }
   // Nota: helper más específico abajo: `get_step_payload_by_name_typed`.

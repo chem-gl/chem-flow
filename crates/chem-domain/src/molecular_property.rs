@@ -29,14 +29,14 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
              metadata: M)
              -> Result<Self, DomainError> {
     if property_type.trim().is_empty() {
-      return Err(DomainError::ValidationError("El tipo de propiedad no puede estar vacío".to_string()));
+      return Err(DomainError::validation("MolecularProperty", "El tipo de propiedad no puede estar vacío"));
     }
     let mut hasher = Sha256::new();
     hasher.update(molecule.inchikey().as_bytes());
     hasher.update(property_type.as_bytes());
-    let value_json = serde_json::to_string(&value).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let value_json = serde_json::to_string(&value)?;
     hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&metadata).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let metadata_json = serde_json::to_string(&metadata)?;
     hasher.update(metadata_json.as_bytes());
     let value_hash = format!("{:x}", hasher.finalize());
     Ok(Self { id: Uuid::new_v4(),
@@ -116,9 +116,9 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
     let mut hasher = Sha256::new();
     hasher.update(self.molecule.inchikey().as_bytes());
     hasher.update(self.property_type.as_bytes());
-    let value_json = serde_json::to_string(&self.value).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let value_json = serde_json::to_string(&self.value)?;
     hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&self.metadata).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let metadata_json = serde_json::to_string(&self.metadata)?;
     hasher.update(metadata_json.as_bytes());
     let calculated_hash = format!("{:x}", hasher.finalize());
     Ok(calculated_hash == self.value_hash)

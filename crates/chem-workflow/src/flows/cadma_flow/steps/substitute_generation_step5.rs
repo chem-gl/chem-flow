@@ -1,6 +1,7 @@
 use crate::errors::WorkflowError;
 use crate::impl_workflow_step;
 use crate::step::StepContext;
+use chem_domain::ports::ProviderMolecule;
 use chem_domain::{Molecule, MoleculeFamily};
 use chem_providers::{ChemEngine, ChemEngineInterface};
 use serde::{Deserialize, Serialize};
@@ -242,13 +243,32 @@ impl SubstituteGenerationStep5 {
                     continue;
                   }
                   if input.save_generated {
-                    match Molecule::from_smiles(&current_smiles) {
-                      Ok(new_m) => {
-                        let ik_saved = ctx.domain_repo.save_molecule(new_m)?;
-                        seen_inchikeys.insert(final_ik.clone());
-                        generated_molecules.push(ik_saved);
+                    // TODO Phase 4: Inject PropertyProvider via context
+                    let engine = ChemEngine::init().map_err(|e| {
+                                                     WorkflowError::Domain(chem_domain::DomainError::provider("ChemEngine",
+                                                                                            format!("Init failed: {}", e)))
+                                                   })?;
+                    match engine.get_molecule(&current_smiles) {
+                      Ok(provider_mol) => {
+                        // Convert chem_providers::Molecule to chem_domain::ports::ProviderMolecule
+                        let domain_provider_mol = ProviderMolecule { inchikey: provider_mol.inchikey,
+                                                                     inchi: provider_mol.inchi,
+                                                                     smiles: provider_mol.smiles,
+                                                                     num_atoms: provider_mol.num_atoms,
+                                                                     mol_weight: provider_mol.mol_weight,
+                                                                     mol_formula: provider_mol.mol_formula,
+                                                                     structure: None /* TODO: convert structure if
+                                                                                      * needed */ };
+                        match Molecule::from_provider_molecule(&current_smiles, domain_provider_mol) {
+                          Ok(new_m) => {
+                            let ik_saved = ctx.domain_repo.save_molecule(new_m)?;
+                            seen_inchikeys.insert(final_ik.clone());
+                            generated_molecules.push(ik_saved);
+                          }
+                          Err(e) => warnings.push(format!("No se pudo construir molécula final: {}", e)),
+                        }
                       }
-                      Err(e) => warnings.push(format!("No se pudo construir molécula final: {}", e)),
+                      Err(e) => warnings.push(format!("Engine error: {}", e)),
                     }
                   }
                 }

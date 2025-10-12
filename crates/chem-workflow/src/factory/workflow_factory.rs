@@ -50,7 +50,7 @@ impl ChemicalWorkflowFactory {
     let id = repo_arc.create_flow(Some(create_name), Some("created".into()), json!({}))?;
     repo_arc.set_meta(&id, "workflow_type", json!(workflow_type.to_string()))?;
     let domain_repo = chem_persistence::new_domain_from_env()?;
-    let domain_arc: Arc<dyn chem_domain::DomainRepository> = Arc::new(domain_repo);
+    let domain_arc: Arc<dyn chem_domain::AllDomainPorts> = Arc::new(domain_repo);
     let engine = E::construct_with_repos(id, repo_arc, domain_arc);
     Ok(Box::new(engine))
   }
@@ -66,7 +66,7 @@ impl ChemicalWorkflowFactory {
     let repo = chem_persistence::new_flow_from_env()?;
     let repo_arc: Arc<dyn FlowRepository> = Arc::new(repo);
     let domain_repo = chem_persistence::new_domain_from_env()?;
-    let domain_arc: Arc<dyn chem_domain::DomainRepository> = Arc::new(domain_repo);
+    let domain_arc: Arc<dyn chem_domain::AllDomainPorts> = Arc::new(domain_repo);
     let engine = E::rehydrate(*_flow_id, repo_arc.clone(), domain_arc)?;
     if let Ok(meta_val) = engine.get_metadata("flow_metadata") {
       let has_cs = meta_val.get("current_step").is_some();

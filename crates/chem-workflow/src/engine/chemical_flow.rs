@@ -3,7 +3,7 @@ use crate::engine::keys::step_state_key;
 use crate::step::{StepContext, StepInfo};
 use crate::{workflow_type::WorkflowType, WorkflowError};
 use base64::Engine;
-use chem_domain::DomainRepository;
+use chem_domain::AllDomainPorts;
 use chrono::Utc;
 use flow::domain::{FlowData, PersistResult};
 use flow::repository::FlowRepository;
@@ -38,14 +38,14 @@ pub trait ChemicalFlowEngine: Send + Sync {
     where Self: Sized;
 
   /// Construye una instancia con repositorios
-  fn construct_with_repos(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn DomainRepository>) -> Self
+  fn construct_with_repos(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn AllDomainPorts>) -> Self
     where Self: Sized;
 
   /// Obtiene la referencia al repositorio de flows
   fn flow_repo(&self) -> &Arc<dyn FlowRepository>;
 
   /// Obtiene la referencia al repositorio de dominio
-  fn domain_repo(&self) -> &Arc<dyn DomainRepository>;
+  fn domain_repo(&self) -> &Arc<dyn AllDomainPorts>;
 
   /// Obtiene el paso actual como trait object dinámico
   fn get_current_step(&self) -> Result<Box<dyn crate::step::WorkflowStepDyn>, WorkflowError>;
@@ -71,7 +71,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
   }
 
   /// Crea una nueva instancia del engine
-  fn new(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn DomainRepository>) -> Self
+  fn new(id: Uuid, flow_repo: Arc<dyn FlowRepository>, domain_repo: Arc<dyn AllDomainPorts>) -> Self
     where Self: Sized
   {
     Self::construct_with_repos(id, flow_repo, domain_repo)
@@ -80,7 +80,7 @@ pub trait ChemicalFlowEngine: Send + Sync {
   /// Rehidrata una instancia existente desde almacenamiento
   fn rehydrate(id: Uuid,
                flow_repo: Arc<dyn FlowRepository>,
-               domain_repo: Arc<dyn DomainRepository>)
+               domain_repo: Arc<dyn AllDomainPorts>)
                -> Result<Self, WorkflowError>
     where Self: Sized
   {
@@ -428,7 +428,7 @@ macro_rules! impl_chemical_flow {
             fn construct_with_repos(
                 id: ::uuid::Uuid,
                 flow_repo: ::std::sync::Arc<dyn ::flow::repository::FlowRepository>,
-                domain_repo: ::std::sync::Arc<dyn ::chem_domain::DomainRepository>
+                domain_repo: ::std::sync::Arc<dyn ::chem_domain::AllDomainPorts>
             ) -> Self {
                 Self { id, state: Default::default(), flow_repo, domain_repo }
             }
@@ -437,7 +437,7 @@ macro_rules! impl_chemical_flow {
                 &self.flow_repo
             }
 
-            fn domain_repo(&self) -> &::std::sync::Arc<dyn ::chem_domain::DomainRepository> {
+            fn domain_repo(&self) -> &::std::sync::Arc<dyn ::chem_domain::AllDomainPorts> {
                 &self.domain_repo
             }
 

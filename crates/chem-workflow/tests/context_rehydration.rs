@@ -1,4 +1,4 @@
-use chem_domain::{DomainRepository, InMemoryDomainRepository};
+use chem_domain::InMemoryDomainRepository;
 use chem_workflow::step::{StepContext, StepInfo};
 use flow::repository::FlowRepository; // bring trait into scope
 use flow::stubs::InMemoryFlowRepository;
@@ -9,7 +9,7 @@ use std::sync::Arc;
 fn step_context_deduplicates_and_retrieves_by_key() {
   // Setup in-memory repos
   let flow_repo = Arc::new(InMemoryFlowRepository::new());
-  let domain_repo: Arc<dyn DomainRepository> = Arc::new(InMemoryDomainRepository::new());
+  let domain_repo = Arc::new(InMemoryDomainRepository::new());
 
   // Create a flow
   let flow_id = FlowRepository::create_flow(&*flow_repo, Some("ctx".into()), Some("running".into()), json!({})).unwrap();

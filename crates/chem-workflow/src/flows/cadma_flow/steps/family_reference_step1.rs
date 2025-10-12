@@ -2,8 +2,8 @@
 //! Paso 1: seleccionar / fusionar / crear una familia de moléculas.
 //! Objetivo: recibir familias existentes y/o moléculas explícitas, evitar
 //! duplicados por InChIKey, y o bien seleccionar una familia existente (caso
-//! simple) o crear/fusionar una nueva familia persistida en el
-//! DomainRepository.
+//! simple) o crear/fusionar una nueva familia persistida mediante los ports
+//! del dominio.
 
 use crate::errors::WorkflowError;
 use crate::step::{StepContext, StepInfo};
@@ -115,7 +115,7 @@ impl FamilyReferenceStep1 {
     Ok(out)
   }
 
-  /// Construye y persiste una nueva familia usando `DomainRepository`.
+  /// Construye y persiste una nueva familia usando los ports del dominio.
   fn create_and_save_family(&self,
                             ctx: &StepContext,
                             molecules: Vec<Molecule>,

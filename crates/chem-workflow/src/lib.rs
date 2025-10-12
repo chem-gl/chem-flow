@@ -2,7 +2,7 @@
 //!
 //! Crate inicial que define los traits y estructuras principales para
 //! implementar motores de flujo quimicos (ChemicalFlowEngine) que usan
-//! `flow::FlowRepository` y `chem_domain::DomainRepository`.
+//! `flow::FlowRepository` y los puertos de dominio (`chem_domain::AllDomainPorts`).
 pub mod engine;
 pub mod errors;
 pub mod factory;

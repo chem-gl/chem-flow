@@ -3,11 +3,16 @@ name = "chem-workflow"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "cadma_example"
+required-features = ["integration_examples"]
+
 [features]
 default = []
 mock_rdkit = ["chem-providers/mock_rdkit", "chem-domain/mock_rdkit"]
 testing = ["mock_rdkit", "chem-persistence/testing"]
 pg = ["chem-persistence/pg"]
+integration_examples = []
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

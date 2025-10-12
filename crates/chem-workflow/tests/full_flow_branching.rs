@@ -1,4 +1,4 @@
-use chem_domain::{DomainRepository, InMemoryDomainRepository, Molecule, MoleculeFamily};
+use chem_domain::{FamilyRepository, InMemoryDomainRepository, Molecule, MoleculeFamily, MoleculeReader};
 use chem_workflow::flows::cadma_flow::steps::admetsa_generated_step6::{Step6Input, Step6Payload};
 use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::{Step4Input, Step4Payload};
 use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::{Step2Input, Step2Payload};
@@ -30,8 +30,14 @@ fn cadma_flow_branching_runs_all_steps() {
   let mut branch_records: Vec<(Uuid, i64, String)> = Vec::new();
 
   // Step 1 - create a family from explicit molecules (manual mode)
-  let mol1 = Molecule::from_smiles("CCO").unwrap();
-  let mol2 = Molecule::from_smiles("CCCC").unwrap();
+  let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                  "CCO",
+                                  "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                  serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
+  let mol2 = Molecule::from_parts("IJDNQMDRQITEOD-UHFFFAOYSA-N", // butane InChIKey
+                                  "CCCC",
+                                  "InChI=1S/C4H10/c1-3-4-2/h3-4H2,1-2H3",
+                                  serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let s1_input = Step1Input { families: None,
                               molecules: Some(vec![mol1.clone(), mol2.clone()]),
                               new_family_name: Some("FlowFamily".into()),
@@ -95,7 +101,10 @@ fn cadma_flow_branching_runs_all_steps() {
   branch_records.push((branch_id, meta.current_cursor, "Step4".into()));
 
   // Prepare substitute family for Step 5
-  let substitute_member = Molecule::from_smiles("C").unwrap();
+  let substitute_member = Molecule::from_parts("VNWKTOKETHGBQD-UHFFFAOYSA-N", // methane InChIKey
+                                               "C",
+                                               "InChI=1S/CH4/h1H4",
+                                               serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let substitute_family = MoleculeFamily::new(vec![substitute_member.clone()], json!({"origin":"branching-test"})).unwrap();
   let substitute_family_id = domain_repo.save_family(substitute_family).unwrap();
 

@@ -1,4 +1,4 @@
-use chem_domain::DomainRepository;
+use chem_domain::AllDomainPorts;
 use chem_domain::{DomainError, Molecule, MoleculeFamily, OwnedMolecularProperty};
 use chem_persistence::new_domain_from_env;
 use serde_json::json;
@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
   // the backend (Postgres vs Sqlite) based on build features and
   // environment variables. Abort on any error because the demo requires a
   // persistent DB.
-  let repo: Arc<dyn chem_domain::DomainRepository> = match new_domain_from_env() {
+  let repo: Arc<dyn chem_domain::AllDomainPorts> = match new_domain_from_env() {
     Ok(d) => Arc::new(d),
     Err(e) => {
       eprintln!("Error creando repositorio desde CHEM_DB_URL: {:?}. El demo requiere DB.", e);
@@ -68,7 +68,7 @@ fn prompt(msg: &str) -> io::Result<String> {
   io::stdin().read_line(&mut s)?;
   Ok(s.trim_end().to_string())
 }
-fn list_all_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn list_all_molecules(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   match repo.list_molecules() {
     Ok(mols) => {
       println!("Moléculas encontradas: {}", mols.len());
@@ -116,7 +116,7 @@ fn mock_value_for_method(method: &str, prop: &str) -> Option<f64> {
     _ => None,
   }
 }
-fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn create_from_parts(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey: ")?;
   let smiles = prompt("SMILES: ")?;
   let inchi = prompt("InChI: ")?;
@@ -132,23 +132,32 @@ fn create_from_parts(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box
   }
   Ok(())
 }
-fn create_from_smiles(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn create_from_smiles(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let smiles = prompt("SMILES: ")?;
   println!("Creando molécula desde SMILES (puede fallar si no hay motor químico)...");
-  match Molecule::from_smiles(&smiles) {
+  // TODO Phase 4: Re-enable after PropertyProvider implementation
+  println!("NOTA: from_smiles no disponible en Phase 2. Use from_parts con datos conocidos.");
+  println!("Ejemplo: CCO -> InChIKey=LFQSCWFLJHTTHZ-UHFFFAOYSA-N, InChI=InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3");
+
+  // For now, create a hardcoded example
+  match Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                             "CCO",
+                             "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                             serde_json::json!({"phase": 2, "source": "example_hardcoded"}))
+  {
     Ok(m) => match repo.save_molecule(m.clone()) {
       Ok(key) => println!("Molécula generada y guardada con InChIKey={}", key),
       Err(e) => println!("Falló al guardar: {:?}", e),
     },
     Err(e) => match e {
-      DomainError::ValidationError(msg) => println!("SMILES inválido/validación: {}", msg),
-      DomainError::ExternalError(msg) => println!("Error externo (motor químico no disponible?): {}", msg),
+      DomainError::ValidationError { entity: _, reason } => println!("SMILES inválido/validación: {}", reason),
+      DomainError::PersistenceError { operation: _, details } => println!("Error de persistencia: {}", details),
       other => println!("Error al crear molécula: {:?}", other),
     },
   }
   Ok(())
 }
-fn add_property_interactive(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn add_property_interactive(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula a la que agregar la propiedad: ")?;
   match repo.get_molecule(&inchikey) {
     Ok(Some(_m)) => {
@@ -284,7 +293,7 @@ fn add_property_interactive(repo: &dyn chem_domain::DomainRepository) -> Result<
   }
   Ok(())
 }
-fn show_molecule_and_props(repo: &dyn DomainRepository) -> Result<(), Box<dyn Error>> {
+fn show_molecule_and_props(repo: &dyn AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey: ")?;
   match repo.get_molecule(&inchikey) {
     Ok(Some(m)) => {
@@ -309,7 +318,7 @@ fn show_molecule_and_props(repo: &dyn DomainRepository) -> Result<(), Box<dyn Er
   }
   Ok(())
 }
-fn create_family_from_one(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn create_family_from_one(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula inicial para la familia: ")?;
   let meta_s = prompt("Metadatos de la familia (JSON, opcional): ")?;
   let metadata: JsonValue =
@@ -327,7 +336,7 @@ fn create_family_from_one(repo: &dyn chem_domain::DomainRepository) -> Result<()
   }
   Ok(())
 }
-fn add_molecule_to_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn add_molecule_to_family(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a la que agregar la molécula: ")?;
   let inchikey = prompt("InChIKey de la molécula a agregar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {
@@ -354,7 +363,7 @@ fn add_molecule_to_family(repo: &dyn chem_domain::DomainRepository) -> Result<()
   }
   Ok(())
 }
-fn list_families_show_molecules(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn list_families_show_molecules(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   match repo.list_families() {
     Ok(fams) => {
       println!("Familias encontradas: {}", fams.len());
@@ -369,7 +378,7 @@ fn list_families_show_molecules(repo: &dyn chem_domain::DomainRepository) -> Res
   }
   Ok(())
 }
-fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn show_family(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a mostrar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {
     Ok(u) => u,
@@ -415,7 +424,7 @@ fn show_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn E
   }
   Ok(())
 }
-fn remove_molecule_from_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn remove_molecule_from_family(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia de la que quitar la molécula: ")?;
   let inchikey = prompt("InChIKey de la molécula a quitar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {
@@ -431,7 +440,7 @@ fn remove_molecule_from_family(repo: &dyn chem_domain::DomainRepository) -> Resu
   }
   Ok(())
 }
-fn delete_molecule(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn delete_molecule(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let inchikey = prompt("InChIKey de la molécula a eliminar: ")?;
   match repo.delete_molecule(&inchikey) {
     Ok(()) => println!("Molécula eliminada: {}", inchikey),
@@ -439,7 +448,7 @@ fn delete_molecule(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<d
   }
   Ok(())
 }
-fn delete_family(repo: &dyn chem_domain::DomainRepository) -> Result<(), Box<dyn Error>> {
+fn delete_family(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let fam_id_s = prompt("ID de la familia a eliminar: ")?;
   let fam_id = match Uuid::parse_str(&fam_id_s) {
     Ok(u) => u,

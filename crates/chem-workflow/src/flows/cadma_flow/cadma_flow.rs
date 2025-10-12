@@ -11,7 +11,7 @@ use crate::{
   },
   workflow_type::WorkflowType,
 };
-use chem_domain::DomainRepository;
+use chem_domain::AllDomainPorts;
 use flow::repository::FlowRepository;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -40,7 +40,7 @@ pub struct CadmaFlow {
   pub id: Uuid,
   pub state: CadmaState,
   pub flow_repo: Arc<dyn FlowRepository>,
-  pub domain_repo: Arc<dyn DomainRepository>,
+  pub domain_repo: Arc<dyn AllDomainPorts>,
 }
 
 crate::impl_chemical_flow!(

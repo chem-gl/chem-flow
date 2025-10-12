@@ -29,14 +29,14 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
              metadata: M)
              -> Result<Self, DomainError> {
     if property_type.trim().is_empty() {
-      return Err(DomainError::ValidationError("El tipo de propiedad no puede estar vacío".to_string()));
+      return Err(DomainError::validation("FamilyProperty", "El tipo de propiedad no puede estar vacío"));
     }
     let mut hasher = Sha256::new();
     hasher.update(family.family_hash().as_bytes());
     hasher.update(property_type.as_bytes());
-    let value_json = serde_json::to_string(&value).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let value_json = serde_json::to_string(&value)?;
     hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&metadata).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let metadata_json = serde_json::to_string(&metadata)?;
     hasher.update(metadata_json.as_bytes());
     let value_hash = format!("{:x}", hasher.finalize());
     Ok(Self { id: Uuid::new_v4(),
@@ -126,9 +126,9 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
     let mut hasher = Sha256::new();
     hasher.update(self.family.family_hash().as_bytes());
     hasher.update(self.property_type.as_bytes());
-    let value_json = serde_json::to_string(&self.value).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let value_json = serde_json::to_string(&self.value)?;
     hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&self.metadata).map_err(|e| DomainError::SerializationError(e.to_string()))?;
+    let metadata_json = serde_json::to_string(&self.metadata)?;
     hasher.update(metadata_json.as_bytes());
     let calculated_hash = format!("{:x}", hasher.finalize());
     Ok(calculated_hash == self.value_hash)
@@ -163,8 +163,14 @@ mod tests {
 
   #[test]
   fn test_family_property_creation() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_smiles("CCO")?;
-    let mol2 = crate::Molecule::from_smiles("CCN")?;
+    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({}))?;
+    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
+                                           "CCN",
+                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                           json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});
@@ -177,8 +183,14 @@ mod tests {
 
   #[test]
   fn test_family_property_equivalence() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_smiles("CCO")?;
-    let mol2 = crate::Molecule::from_smiles("CCN")?;
+    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({}))?;
+    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
+                                           "CCN",
+                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                           json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});
@@ -190,8 +202,14 @@ mod tests {
 
   #[test]
   fn test_family_property_empty_type() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_smiles("CCO")?;
-    let mol2 = crate::Molecule::from_smiles("CCN")?;
+    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({}))?;
+    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
+                                           "CCN",
+                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                           json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});

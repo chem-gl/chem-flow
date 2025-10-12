@@ -1,6 +1,6 @@
 use crate::errors::WorkflowError;
 use crate::step::StepContext;
-use chem_domain::DomainRepository;
+use chem_domain::AllDomainPorts;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -29,7 +29,7 @@ pub trait WorkflowStep: Send + Sync {
   /// Inicialización opcional donde el paso puede recibir el repositorio de
   /// dominio (por ejemplo para mantenerlo en un campo interno). Por defecto
   /// es no-op; pasos que necesiten el repo pueden sobreescribir este método.
-  fn init(&mut self, _domain_repo: Arc<dyn DomainRepository>) {}
+  fn init(&mut self, _domain_repo: Arc<dyn AllDomainPorts>) {}
 
   // Métodos de utilidad para conversión tipada
   fn into_stepinfo(payload: &Self::Payload, metadata: &Self::Metadata) -> Result<StepInfo, WorkflowError> {
@@ -51,10 +51,10 @@ pub trait WorkflowStep: Send + Sync {
 pub trait WorkflowStepDyn: Send + Sync {
   fn name(&self) -> &'static str;
   fn execute(&self, ctx: &StepContext, input: &JsonValue) -> StepResult;
-  /// Inicialización que permite inyectar el `DomainRepository` cuando el
+  /// Inicialización que permite inyectar los puertos del dominio cuando el
   /// engine crea/obtiene el paso. Por defecto es no-op; implementaciones
   /// concretas pueden almacenar el repo si lo necesitan.
-  fn init(&mut self, _domain_repo: Arc<dyn DomainRepository>);
+  fn init(&mut self, _domain_repo: Arc<dyn AllDomainPorts>);
 }
 
 // Implementación automática del trait dinámico para todos los WorkflowStep
@@ -68,7 +68,7 @@ impl<T> WorkflowStepDyn for T where T: WorkflowStep
     WorkflowStep::execute(self, ctx, input)
   }
 
-  fn init(&mut self, domain_repo: Arc<dyn DomainRepository>) {
+  fn init(&mut self, domain_repo: Arc<dyn AllDomainPorts>) {
     // Delegate to the typed trait default/override so concrete steps can
     // implement `init` on the `WorkflowStep` trait and receive the repo.
     WorkflowStep::init(self, domain_repo)

@@ -1,6 +1,6 @@
 //! Helpers para repositorios en pruebas
 
-use chem_domain::{DomainRepository, InMemoryDomainRepository};
+use chem_domain::InMemoryDomainRepository;
 
 /// Trait para repositorios que pueden ser usados en pruebas
 pub trait TestableRepository {
@@ -12,7 +12,7 @@ pub trait TestableRepository {
 }
 
 /// Crea un repositorio en memoria para pruebas
-pub fn create_test_repository() -> impl DomainRepository + TestableRepository {
+pub fn create_test_repository() -> impl TestableRepository {
   InMemoryDomainRepository::new()
 }
 

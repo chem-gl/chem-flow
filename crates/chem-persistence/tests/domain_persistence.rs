@@ -1,6 +1,6 @@
 #![cfg(all(feature = "sqlite", not(feature = "postgres")))]
 
-use chem_domain::{DomainError, DomainRepository, Molecule, MoleculeFamily};
+use chem_domain::{DomainError, FamilyRepository, Molecule, MoleculeFamily, MoleculeWriter};
 use chem_persistence::test_helpers::create_temp_sqlite_db;
 use chem_persistence::DieselDomainRepository;
 use serde_json::json;
@@ -28,14 +28,14 @@ fn diesel_domain_persistence_family_lifecycle() {
   // Trying to delete m2 should fail because it's referenced by the family version
   // id2
   match repo.delete_molecule(m2.inchikey()) {
-    Err(DomainError::ValidationError(_)) => {}
+    Err(DomainError::ValidationError { .. }) => {}
     other => panic!("expected validation error when deleting referenced molecule, got: {:?}", other),
   }
   // Remove m2 from the family version id2 (creates id3)
   let id3 = repo.remove_molecule_from_family(&id2, m2.inchikey()).expect("remove molecule from family");
   // The old version id2 still references m2, so delete_molecule should still fail
   match repo.delete_molecule(m2.inchikey()) {
-    Err(DomainError::ValidationError(_)) => {}
+    Err(DomainError::ValidationError { .. }) => {}
     other => panic!("expected validation error after remove (old version exists), got: {:?}", other),
   }
   // Delete the old family version id2 to remove the reference

@@ -1,49 +1,12 @@
 // molecule.rs
+//! Entidad Molecule - Representación inmutable de una molécula
+
 use crate::DomainError;
-use chem_providers::{ChemEngine, ChemEngineInterface};
 use chrono::Utc;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[cfg(not(any(test, feature = "mock_rdkit")))]
-static ENGINE: Lazy<Result<ChemEngine, DomainError>> = Lazy::new(|| {
-  ChemEngine::init().map_err(|e| DomainError::ExternalError(format!("Error al inicializar el motor químico: {}", e)))
-});
-
-#[cfg(any(test, feature = "mock_rdkit"))]
-static ENGINE: Lazy<Result<Box<dyn ChemEngineInterface>, DomainError>> = Lazy::new(|| {
-  // Use the mock engine for tests
-  let engine = {
-    #[cfg(feature = "mock_rdkit")]
-    {
-      // Create a mock implementation
-      let mut mock = chem_providers::MockChemEngineInterface::new();
-
-      // Configure the mock to return predictable responses
-      mock.expect_get_molecule().returning(|smiles| {
-                                  Ok(chem_providers::Molecule { inchikey: format!("MOCK-{}-ABCDEFGHIJ-P", smiles),
-                                                                inchi: format!("InChI=MOCK/{}", smiles),
-                                                                smiles: smiles.to_string(),
-                                                                num_atoms: (smiles.len() as u32).max(1),
-                                                                mol_weight: 12.01 * (smiles.len() as f64).max(1.0),
-                                                                mol_formula: format!("C{}", smiles.len().max(1)),
-                                                                structure: None })
-                                });
-
-      mock
-    }
-
-    #[cfg(not(feature = "mock_rdkit"))]
-    {
-      // Fall back to regular implementation if mock_rdkit isn't enabled
-      ChemEngine::init().map_err(|e| DomainError::ExternalError(format!("Error al inicializar el motor químico: {}", e)))?
-    }
-  };
-
-  Ok(Box::new(engine))
-});
-
+/// Entidad Molecule (inmutable)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Molecule {
   inchikey: String,
@@ -53,80 +16,83 @@ pub struct Molecule {
 }
 
 impl Molecule {
+  /// Constructor interno con validación
   fn new(inchikey: &str, smiles: &str, inchi: &str, metadata: serde_json::Value) -> Result<Self, DomainError> {
+    // Validar InChIKey
     let normalized_inchikey = inchikey.to_uppercase();
     if normalized_inchikey.len() != 27 {
-      return Err(DomainError::ValidationError(format!("InChIKey debe tener exactamente 27 caracteres, pero tiene {} y \
-                                                       es: {} la entrada fue: {} y el smiles: {}",
-                                                      normalized_inchikey.len(),
-                                                      normalized_inchikey,
-                                                      inchikey,
-                                                      smiles)));
+      return Err(DomainError::invalid_format("inchikey",
+                                             inchikey,
+                                             format!("debe tener 27 caracteres, tiene {}", normalized_inchikey.len())));
     }
     if normalized_inchikey.matches('-').count() != 2 {
-      return Err(DomainError::ValidationError("InChIKey debe contener exactamente dos guiones".to_string()));
+      return Err(DomainError::invalid_format("inchikey", inchikey, "debe contener exactamente dos guiones"));
     }
+
     let parts: Vec<&str> = normalized_inchikey.split('-').collect();
     if parts.len() != 3
        || !parts[0].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
        || !parts[1].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
        || !parts[2].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
     {
-      return Err(DomainError::ValidationError("Formato InChIKey inválido o contiene caracteres inválidos".to_string()));
+      return Err(DomainError::invalid_format("inchikey",
+                                             inchikey,
+                                             "contiene caracteres inválidos (solo A-Z y 0-9 permitidos)"));
     }
+
+    // Validar SMILES
     if smiles.trim().is_empty() {
-      return Err(DomainError::ValidationError("SMILES no puede estar vacío".to_string()));
+      return Err(DomainError::validation("Molecule", "SMILES no puede estar vacío"));
     }
+
+    // Validar InChI
     if inchi.trim().is_empty() {
-      return Err(DomainError::ValidationError("InChI no puede estar vacío".to_string()));
+      return Err(DomainError::validation("Molecule", "InChI no puede estar vacío"));
     }
+
     Ok(Self { inchikey: normalized_inchikey, smiles: smiles.to_string(), inchi: inchi.to_string(), metadata })
   }
 
+  /// Crea una molécula desde sus partes componentes (para persistencia)
+  ///
+  /// # Validaciones
+  /// - InChIKey debe tener 27 caracteres con formato válido
+  /// - SMILES no puede estar vacío
+  /// - InChI no puede estar vacío
   pub fn from_parts(inchikey: &str, smiles: &str, inchi: &str, metadata: serde_json::Value) -> Result<Self, DomainError> {
     Self::new(inchikey, smiles, inchi, metadata)
   }
 
-  pub fn from_smiles(smiles: &str) -> Result<Self, DomainError> {
-    if smiles.trim().is_empty() {
-      return Err(DomainError::ValidationError("SMILES de entrada no puede estar vacío".to_string()));
-    }
-
-    // Obtain molecule from the appropriate engine based on feature flags
-    let chem_molecule = {
-      #[cfg(not(any(test, feature = "mock_rdkit")))]
-      {
-        let engine: &ChemEngine = ENGINE.as_ref().map_err(|e| e.clone())?;
-        ChemEngineInterface::get_molecule(engine, smiles).map_err(|e| {
-                                                           DomainError::ExternalError(format!("Error al procesar SMILES: \
-                                                                                               {}",
-                                                                                              e))
-                                                         })?
-      }
-
-      #[cfg(any(test, feature = "mock_rdkit"))]
-      {
-        let engine = ENGINE.as_ref().map_err(|e| e.clone())?;
-        engine.get_molecule(smiles).map_err(|e| DomainError::ExternalError(format!("Error al procesar SMILES: {}", e)))?
-      }
-    };
-
+  /// Crea una molécula desde SMILES usando un PropertyProvider
+  ///
+  /// Este método debe ser llamado desde un servicio de dominio que tenga
+  /// acceso al PropertyProvider inyectado.
+  pub fn from_provider_molecule(original_smiles: &str,
+                                provider_molecule: crate::ports::ProviderMolecule)
+                                -> Result<Self, DomainError> {
     // Base metadata
     let mut meta = serde_json::json!({
-      "source": "created_from_smiles",
-      "original_smiles": smiles,
-      "generation_timestamp": Utc::now().to_rfc3339(),
+        "source": "created_from_smiles",
+        "original_smiles": original_smiles,
+        "generation_timestamp": Utc::now().to_rfc3339(),
+        "mol_weight": provider_molecule.mol_weight,
+        "mol_formula": provider_molecule.mol_formula,
+        "num_atoms": provider_molecule.num_atoms,
     });
-    // If provider returned structure, insert it into metadata so persistence can
-    // save it.
-    if let Some(structure) = chem_molecule.structure {
-      // serialize the structure into a JSON value and attach under key "structure"
+
+    // Si hay estructura, agregarla al metadata
+    if let Some(structure) = provider_molecule.structure {
       let struct_val = serde_json::to_value(&structure)?;
       meta["structure"] = struct_val;
     }
 
-    Self::new(&chem_molecule.inchikey, &chem_molecule.smiles, &chem_molecule.inchi, meta)
+    Self::new(&provider_molecule.inchikey,
+              &provider_molecule.smiles,
+              &provider_molecule.inchi,
+              meta)
   }
+
+  // === Getters ===
 
   pub fn smiles(&self) -> &str {
     &self.smiles
@@ -144,6 +110,9 @@ impl Molecule {
     &self.metadata
   }
 
+  // === Métodos de dominio ===
+
+  /// Verifica si dos moléculas son la misma (mismo InChIKey)
   pub fn is_same(&self, other: &Molecule) -> bool {
     self.inchikey == other.inchikey
   }
@@ -154,5 +123,55 @@ impl fmt::Display for Molecule {
     write!(f,
            "Molecule(SMILES: {}, InChI: {}, InChIKey: {})",
            self.smiles, self.inchi, self.inchikey)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_from_parts_valid() {
+    let result = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol real InChIKey
+                                      "CCO",
+                                      "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                      serde_json::json!({}));
+    assert!(result.is_ok());
+  }
+
+  #[test]
+  fn test_from_parts_invalid_inchikey_length() {
+    let result = Molecule::from_parts("SHORT", "CCO", "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3", serde_json::json!({}));
+    assert!(result.is_err());
+    if let Err(DomainError::InvalidFormat { field, .. }) = result {
+      assert_eq!(field, "inchikey");
+    }
+  }
+
+  #[test]
+  fn test_from_parts_empty_smiles() {
+    let result = Molecule::from_parts("AAAAA-BBBBBBBBB-CCCCCCCCC-P",
+                                      "",
+                                      "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                      serde_json::json!({}));
+    assert!(result.is_err());
+    if let Err(DomainError::ValidationError { entity, .. }) = result {
+      assert_eq!(entity, "Molecule");
+    }
+  }
+
+  #[test]
+  fn test_is_same() {
+    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol real InChIKey
+                                    "CCO",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    serde_json::json!({})).unwrap();
+
+    let mol2 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // same InChIKey
+                                    "C(C)O",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    serde_json::json!({})).unwrap();
+
+    assert!(mol1.is_same(&mol2));
   }
 }

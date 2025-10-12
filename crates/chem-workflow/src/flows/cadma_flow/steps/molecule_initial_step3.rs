@@ -3,11 +3,13 @@
 //! - Soporta métodos Manual y Random.
 //! - Manual: usa SMILES proporcionadas.
 //! - Random: selecciona de una lista de candidatos configurables.
-//! - Guarda las moléculas generadas en domain_repo.
+//! - Guarda las moléculas generadas mediante los ports del dominio.
 
 use crate::errors::WorkflowError;
 use crate::step::StepContext;
+use chem_domain::ports::ProviderMolecule;
 use chem_domain::Molecule;
+use chem_providers::{ChemEngine, ChemEngineInterface};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,8 +59,30 @@ impl MoleculeInitialStep3 {
     let mut generated_inchikeys = Vec::new();
     let mut domain_refs = Vec::new();
 
+    // TODO Phase 4: Inject PropertyProvider via context instead of static ENGINE
+    let engine = ChemEngine::init().map_err(|e| {
+                                     WorkflowError::Domain(chem_domain::DomainError::provider("ChemEngine",
+                                                                            format!("Failed to initialize: {}", e)))
+                                   })?;
+
     for smiles in &smiles_list {
-      let molecule = Molecule::from_smiles(smiles).map_err(WorkflowError::Domain)?;
+      let provider_mol = engine.get_molecule(smiles).map_err(|e| {
+                                                       WorkflowError::Domain(chem_domain::DomainError::provider("ChemEngine",
+                                                                                               format!("Failed to parse \
+                                                                                                        SMILES: {}",
+                                                                                                       e)))
+                                                     })?;
+
+      // Convert chem_providers::Molecule to chem_domain::ports::ProviderMolecule
+      let domain_provider_mol = ProviderMolecule { inchikey: provider_mol.inchikey,
+                                                   inchi: provider_mol.inchi,
+                                                   smiles: provider_mol.smiles,
+                                                   num_atoms: provider_mol.num_atoms,
+                                                   mol_weight: provider_mol.mol_weight,
+                                                   mol_formula: provider_mol.mol_formula,
+                                                   structure: None /* TODO: convert structure if needed */ };
+
+      let molecule = Molecule::from_provider_molecule(smiles, domain_provider_mol).map_err(WorkflowError::Domain)?;
       let inchikey = ctx.domain_repo.save_molecule(molecule.clone())?;
       generated_inchikeys.push(inchikey.clone());
       domain_refs.push(inchikey);

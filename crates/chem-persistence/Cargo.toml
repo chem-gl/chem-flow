@@ -11,6 +11,7 @@ pg = ["postgres"]
 no-artifact-insert = []
 testing = ["sqlite", "tempfile"]
 mock_rdkit = ["chem-domain/mock_rdkit"]
+integration_tests_disabled = []
 
 [dependencies]
 flow = { path = "../flow" }
