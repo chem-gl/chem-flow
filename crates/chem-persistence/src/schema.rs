@@ -45,6 +45,11 @@ diesel::table! {
         inchi -> Text,
         metadata -> Text,
         structure -> Nullable<Text>,
+        id -> Nullable<Text>,
+        created_at_ts -> Nullable<BigInt>,
+        updated_at_ts -> Nullable<BigInt>,
+        version -> Nullable<Integer>,
+        molecular_formula -> Nullable<Text>,
     }
 }
 diesel::table! {

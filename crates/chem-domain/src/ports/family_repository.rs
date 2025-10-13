@@ -1,6 +1,7 @@
 // ports/family_repository.rs
 //! Port para operaciones de familias de moléculas
-use crate::{DomainError, Molecule, MoleculeFamily};
+use crate::domain::entities::{Molecule, MoleculeFamily};
+use crate::DomainError;
 use uuid::Uuid;
 /// Port para gestionar familias de moléculas
 pub trait FamilyRepository: Send + Sync {

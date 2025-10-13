@@ -1,36 +1,10 @@
-//ahora serian los demas repository
-// Archivo: repository.rs
-// Propósito: definir el trait `FlowRepository` y los traits auxiliares
-// (`SnapshotStore`, `ArtifactStore`). Describe el contrato que deben
-// implementar las persistencias (Postgres, in-memory, etc.).
 use crate::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
 use crate::errors::Result;
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
-/// Contrato mínimo del repositorio de flujos en el modelo basado en FlowData.
-///
-/// El repositorio persiste registros de datos del flujo (`FlowData`) en tiempo
-/// real: cada registro contiene la información necesaria para reconstruir el
-/// estado en un cursor dado y se guarda inmediatamente.
 pub trait FlowRepository: Send + Sync {
-  /// Obtiene metadatos ligeros del `flow`.
-  ///
-  /// Retorna `FlowMeta` con campos como `current_cursor` y `current_version`.
-  /// Debe devolver `Err(FlowError::NotFound)` si el flow no existe.
   fn get_flow_meta(&self, flow_id: &Uuid) -> Result<FlowMeta>;
-  /// Crea un nuevo flow (insert en tabla `flows`). El repositorio genera
-  /// el `flow_id` y completa los campos derivados (created_at, version,
-  /// cursor). Se pasa sólo la información ergonomica: `name`, `status`
-  /// y `metadata`.
   fn create_flow(&self, name: Option<String>, status: Option<String>, metadata: JsonValue) -> Result<Uuid>;
-  /// Persiste un registro de datos para el flujo. `expected_version` permite
-  /// controlar concurrencia (optimistic). Devuelve `PersistResult`.
-  ///
-  /// Comportamiento esperado:
-  /// - Si `expected_version` no coincide con la versión actual ->
-  ///   `PersistResult::Conflict`.
-  /// - Si `command_id` está presente y ya existe un registro con ese
-  ///   `command_id` -> comportamiento idempotente (no duplicar).
   fn persist_data(&self, data: &FlowData, expected_version: i64) -> Result<PersistResult>;
   /// Lee registros de datos a partir de un cursor (exclusive), ordenados.
   fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> Result<Vec<FlowData>>;

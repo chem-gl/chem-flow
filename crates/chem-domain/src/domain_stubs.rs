@@ -1,6 +1,7 @@
+use crate::domain::entities::{Molecule, MoleculeFamily};
 use crate::ports::{FamilyRepository, MoleculeReader, MoleculeWriter, PropertyRepository};
 use crate::DomainError;
-use crate::{Molecule, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty};
+use crate::{OwnedFamilyProperty, OwnedMolecularProperty};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -52,8 +53,9 @@ impl MoleculeWriter for InMemoryDomainRepository {
   fn delete_molecule(&self, inchikey: &str) -> Result<(), DomainError> {
     // Check families first
     let families = self.lock_map(&self.families, "families")?;
+    let inchikey_obj = crate::domain::value_objects::InChIKey::try_from(inchikey)?;
     for (_id, fam) in families.iter() {
-      if fam.contains(inchikey) {
+      if fam.contains(&inchikey_obj) {
         return Err(DomainError::validation("Molecule",
                                            format!("No se puede eliminar la molécula {}; pertenece a una familia",
                                                    inchikey)));
@@ -98,7 +100,8 @@ impl FamilyRepository for InMemoryDomainRepository {
   fn remove_molecule_from_family(&self, family_id: &Uuid, inchikey: &str) -> Result<Uuid, DomainError> {
     let fam_opt = self.get_family(family_id)?;
     let fam = fam_opt.ok_or_else(|| DomainError::not_found("MoleculeFamily", family_id.to_string()))?;
-    let new_fam = fam.remove_molecule(inchikey)?;
+    let inchikey_obj = crate::domain::value_objects::InChIKey::try_from(inchikey)?;
+    let new_fam = fam.remove_molecule(&inchikey_obj)?;
     self.save_family(new_fam)
   }
 }
@@ -136,14 +139,14 @@ impl DomainStubs {
   pub fn sample_repo() -> InMemoryDomainRepository {
     let repo = InMemoryDomainRepository::new();
     // Crear dos moléculas simples usando from_parts para evitar dependencia RDKit
-    let m1 = Molecule::from_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
-                                  "CCO",
-                                  "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                  json!({})).unwrap();
-    let m2 = Molecule::from_parts("CCCCCCCCCCCCCC-DDDDDDDDDD-E",
-                                  "CCN",
-                                  "InChI=1S/C2H7N/c1-2-3/h3H,2H2,1H3",
-                                  json!({})).unwrap();
+    let m1 = Molecule::from_simple_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
+                                         "CCO",
+                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                         json!({})).unwrap();
+    let m2 = Molecule::from_simple_parts("CCCCCCCCCCCCCC-DDDDDDDDDD-E",
+                                         "CCN",
+                                         "InChI=1S/C2H7N/c1-2-3/h3H,2H2,1H3",
+                                         json!({})).unwrap();
     let family = MoleculeFamily::new(vec![m1.clone(), m2.clone()], json!({"source": "stub"})).unwrap();
     let _ = MoleculeWriter::save_molecule(&repo, m1.clone());
     let _ = MoleculeWriter::save_molecule(&repo, m2.clone());
@@ -170,14 +173,14 @@ mod tests {
   #[test]
   fn save_and_get_family() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
-    let m1 = crate::Molecule::from_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
-                                         "CCO",
-                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                         json!({}))?;
-    let m2 = crate::Molecule::from_parts("CCCCCCCCCCCCCC-DDDDDDDDDD-E",
-                                         "CCN",
-                                         "InChI=1S/C2H7N/c1-2-3/h3H,2H2,1H3",
-                                         json!({}))?;
+    let m1 = crate::Molecule::from_simple_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
+                                                "CCO",
+                                                "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                                json!({}))?;
+    let m2 = crate::Molecule::from_simple_parts("CCCCCCCCCCCCCC-DDDDDDDDDD-E",
+                                                "CCN",
+                                                "InChI=1S/C2H7N/c1-2-3/h3H,2H2,1H3",
+                                                json!({}))?;
     let family = crate::MoleculeFamily::new(vec![m1.clone(), m2.clone()], json!({"test": true}))?;
     let id = FamilyRepository::save_family(&repo, family.clone())?;
     let loaded = FamilyRepository::get_family(&repo, &id)?;
@@ -189,10 +192,10 @@ mod tests {
   #[test]
   fn save_and_get_molecule() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
-    let m = crate::Molecule::from_parts("EEEEEEEEEEEEEE-FFFFFFFFFF-G",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({}))?;
+    let m = crate::Molecule::from_simple_parts("EEEEEEEEEEEEEE-FFFFFFFFFF-G",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({}))?;
     let key = MoleculeWriter::save_molecule(&repo, m.clone())?;
     let loaded = MoleculeReader::get_molecule(&repo, &key)?;
     assert!(loaded.is_some());
@@ -202,10 +205,10 @@ mod tests {
   #[test]
   fn save_and_get_properties() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
-    let m = crate::Molecule::from_parts("HHHHHHHHHHHHHH-IIIIIIIIII-J",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({}))?;
+    let m = crate::Molecule::from_simple_parts("HHHHHHHHHHHHHH-IIIIIIIIII-J",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({}))?;
     let _m_key = MoleculeWriter::save_molecule(&repo, m.clone())?;
     // Crear familia
     let family = MoleculeFamily::new(vec![m.clone()], json!({"test": true}))?;
@@ -220,7 +223,7 @@ mod tests {
                                       value_hash: "h".into(),
                                       metadata: json!({}) };
     repo.save_molecular_property(mp.clone())?;
-    let loaded_mp = repo.get_molecular_properties(m.inchikey())?;
+    let loaded_mp = repo.get_molecular_properties(m.inchikey().as_str())?;
     assert_eq!(loaded_mp.len(), 1);
     // Guardar propiedad de familia
     let fp = OwnedFamilyProperty { id: uuid::Uuid::new_v4(),

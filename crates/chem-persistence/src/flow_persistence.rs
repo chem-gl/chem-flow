@@ -1,11 +1,16 @@
 //! Lógica de persistencia para el dominio (migrado desde lib.rs)
 use crate::db::run_migrations_on_pool;
+use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool, PooledConnection};
 use diesel::result::Error as DieselError;
-use flow::domain::{FlowData, FlowMeta, PersistResult, SnapshotMeta, WorkItem};
+use flow::domain::{FlowData, FlowMeta, FlowMetadata, PersistResult, SnapshotMeta, WorkItem};
 use flow::errors::{FlowError, Result as FlowResult};
+use flow::ports::outbound::{
+  BranchInfo, BranchManagementPort, FlowDataPort, FlowMetadataPort, FlowRepository as OutboundFlowRepository, MetadataPort,
+  RepositoryStats, SnapshotPort,
+};
 use flow::repository::{ArtifactStore, FlowRepository, SnapshotStore};
 use serde_json::Value as JsonValue;
 use std::fs;
@@ -206,72 +211,117 @@ impl DieselFlowRepository {
 fn map_db_err<T>(res: std::result::Result<T, DieselError>) -> FlowResult<T> {
   res.map_err(|e| FlowError::Storage(format!("db: {}", e)))
 }
-impl FlowRepository for DieselFlowRepository {
-  fn get_flow_meta(&self, flow_id: &Uuid) -> FlowResult<FlowMeta> {
+#[async_trait]
+impl FlowMetadataPort for DieselFlowRepository {
+  async fn get_flow_metadata(&self, flow_id: &Uuid) -> FlowResult<FlowMetadata> {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     let row = map_db_err(flows.select(FlowRow::as_select()).filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
-    Ok(FlowMeta { id: Uuid::parse_str(&row.id).unwrap(),
-                  name: row.name,
-                  status: row.status,
-                  created_by: row.created_by,
-                  created_at: Utc.timestamp_opt(row.created_at_ts, 0).single().unwrap_or(Utc::now()),
-                  current_cursor: row.current_cursor,
-                  current_version: row.current_version,
-                  parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                  parent_cursor: row.parent_cursor,
-                  metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})) })
+    Ok(FlowMetadata { id: Uuid::parse_str(&row.id).unwrap(),
+                      name: row.name,
+                      status: row.status,
+                      created_by: row.created_by,
+                      created_at: Utc.timestamp_opt(row.created_at_ts, 0).single().unwrap_or(Utc::now()),
+                      current_cursor: row.current_cursor,
+                      current_version: row.current_version,
+                      parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
+                      parent_cursor: row.parent_cursor,
+                      metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})) })
   }
-  fn dump_tables_for_debug(&self) -> FlowResult<(Vec<FlowMeta>, Vec<FlowData>)> {
+
+  async fn create_flow(&self, metadata: FlowMetadata) -> FlowResult<Uuid> {
     let mut conn = self.conn()?;
-    let frows = map_db_err(flows_dsl::flows.select(FlowRow::as_select()).load::<FlowRow>(&mut conn))?;
-    let mut flows_out = Vec::new();
-    for r in frows {
-      flows_out.push(FlowMeta { id: Uuid::parse_str(&r.id).unwrap(),
-                                name: r.name,
-                                status: r.status,
-                                created_by: r.created_by,
-                                created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()),
-                                current_cursor: r.current_cursor,
-                                current_version: r.current_version,
-                                parent_flow_id: r.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                                parent_cursor: r.parent_cursor,
-                                metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})) });
-    }
-    let drows = map_db_err(data_dsl::flow_data.load::<FlowDataRow>(&mut conn))?;
-    let mut data_out = Vec::new();
-    for r in drows {
-      data_out.push(FlowData { id: Uuid::parse_str(&r.id).unwrap(),
-                               flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
-                               cursor: r.cursor,
-                               key: r.key,
-                               payload: serde_json::from_str(&r.payload).unwrap_or(serde_json::json!({})),
-                               metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
-                               command_id: r.command_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                               created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) });
-    }
-    Ok((flows_out, data_out))
-  }
-  fn create_flow(&self, name_in: Option<String>, status_in: Option<String>, metadata_in: JsonValue) -> FlowResult<Uuid> {
-    let mut conn = self.conn()?;
-    let new_id = Uuid::new_v4();
-    let now_ts = Utc::now().timestamp();
-    let meta_s = metadata_in.to_string();
+    let new_id = metadata.id;
+    let now_ts = metadata.created_at.timestamp();
+    let meta_s = metadata.metadata.to_string();
     let new = FlowRow { id: new_id.to_string(),
-                        name: name_in,
-                        status: status_in,
-                        created_by: None,
+                        name: metadata.name,
+                        status: metadata.status,
+                        created_by: metadata.created_by,
                         created_at_ts: now_ts,
-                        current_cursor: 0,
-                        current_version: 0,
-                        parent_flow_id: None,
-                        parent_cursor: None,
+                        current_cursor: metadata.current_cursor,
+                        current_version: metadata.current_version,
+                        parent_flow_id: metadata.parent_flow_id.map(|u| u.to_string()),
+                        parent_cursor: metadata.parent_cursor,
                         metadata: meta_s };
     map_db_err(diesel::insert_into(flows_dsl::flows).values(&new).execute(&mut conn))?;
     Ok(new_id)
   }
-  fn persist_data(&self, data: &FlowData, expected_version: i64) -> FlowResult<PersistResult> {
+
+  async fn update_flow_metadata(&self, flow_id: &Uuid, flow_metadata: FlowMetadata) -> FlowResult<()> {
+    use diesel::prelude::*;
+    use schema::flows::dsl::*;
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+    let meta_s = flow_metadata.metadata.to_string();
+    map_db_err(diesel::update(flows.filter(id.eq(&fid))).set((name.eq(flow_metadata.name),
+                                                              status.eq(flow_metadata.status),
+                                                              created_by.eq(flow_metadata.created_by),
+                                                              current_cursor.eq(flow_metadata.current_cursor),
+                                                              current_version.eq(flow_metadata.current_version),
+                                                              parent_flow_id.eq(flow_metadata.parent_flow_id
+                                                                                             .map(|u| u.to_string())),
+                                                              parent_cursor.eq(flow_metadata.parent_cursor),
+                                                              metadata.eq(meta_s)))
+                                                        .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn delete_flow(&self, flow_id: &Uuid) -> FlowResult<()> {
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+    // Delete in order: data, snapshots, then flow
+    conn.transaction::<(), diesel::result::Error, _>(|conn| {
+          diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
+          Ok(())
+        })
+        .map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
+  }
+
+  async fn list_flow_ids(&self) -> FlowResult<Vec<Uuid>> {
+    use schema::flows::dsl::*;
+    let mut conn = self.conn()?;
+    let rows = map_db_err(flows.select(id).load::<String>(&mut conn))?;
+    let mut out = Vec::new();
+    for s in rows {
+      if let Ok(u) = Uuid::parse_str(&s) {
+        out.push(u);
+      }
+    }
+    Ok(out)
+  }
+
+  async fn flow_exists(&self, flow_id: &Uuid) -> FlowResult<bool> {
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+    let c: i64 = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)).count().get_result(&mut conn))?;
+    Ok(c > 0)
+  }
+
+  async fn get_flow_status(&self, flow_id: &Uuid) -> FlowResult<Option<String>> {
+    use schema::flows::dsl::*;
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+    let row_opt = flows.select(status)
+                       .filter(id.eq(&fid))
+                       .first::<Option<String>>(&mut conn)
+                       .optional()
+                       .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    Ok(row_opt.flatten())
+  }
+
+  async fn set_flow_status(&self, _flow_id: &Uuid, _status: Option<String>) -> FlowResult<()> {
+    // TODO: Implement when needed
+    Ok(())
+  }
+}
+
+#[async_trait]
+impl FlowDataPort for DieselFlowRepository {
+  async fn persist_data(&self, data: &FlowData, expected_version: i64) -> FlowResult<PersistResult> {
     use diesel::prelude::*;
     let mut conn = self.conn()?;
     let fid = data.flow_id.to_string();
@@ -302,7 +352,8 @@ impl FlowRepository for DieselFlowRepository {
       Err(e) => Err(FlowError::Storage(format!("db txn: {}", e))),
     }
   }
-  fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> FlowResult<Vec<FlowData>> {
+
+  async fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> FlowResult<Vec<FlowData>> {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     let rows = map_db_err(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.gt(from_cursor)))
@@ -323,66 +374,70 @@ impl FlowRepository for DieselFlowRepository {
     }
     Ok(out)
   }
-  fn load_latest_snapshot(&self, flow_id_in: &Uuid) -> FlowResult<Option<SnapshotMeta>> {
-    use schema::snapshots::dsl::*;
+
+  async fn read_data_at_cursor(&self, flow_id: &Uuid, cursor: i64) -> FlowResult<Option<FlowData>> {
     let mut conn = self.conn()?;
-    let fid_s = flow_id_in.to_string();
-    let row_opt = snapshots.filter(flow_id.eq(&fid_s))
-                           .order((cursor.desc(), created_at_ts.desc()))
-                           .first::<SnapshotRow>(&mut conn)
-                           .optional()
-                           .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    let fid = flow_id.to_string();
+    let row_opt = data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.eq(cursor)))
+                                     .first::<FlowDataRow>(&mut conn)
+                                     .optional()
+                                     .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
     if let Some(r) = row_opt {
-      let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
-                                flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
-                                cursor: r.cursor,
-                                state_ptr: r.state_ptr.clone(),
-                                metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
-                                created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
-      Ok(Some(meta))
+      let created = Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now());
+      let item = FlowData { id: Uuid::parse_str(&r.id).unwrap(),
+                            flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
+                            cursor: r.cursor,
+                            key: r.key,
+                            payload: serde_json::from_str(&r.payload).unwrap_or(serde_json::json!({})),
+                            metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
+                            command_id: r.command_id.and_then(|s| Uuid::parse_str(&s).ok()),
+                            created_at: created };
+      Ok(Some(item))
     } else {
       Ok(None)
     }
   }
-  fn load_snapshot(&self, snapshot_id: &Uuid) -> FlowResult<(Vec<u8>, SnapshotMeta)> {
-    use schema::snapshots::dsl::*;
+
+  async fn count_flow_data(&self, flow_id: &Uuid) -> FlowResult<i64> {
     let mut conn = self.conn()?;
-    let sid = snapshot_id.to_string();
-    let r =
-      snapshots.filter(id.eq(&sid)).first::<SnapshotRow>(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-    let bytes = self.load(&r.state_ptr)?;
-    let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
-                              flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
-                              cursor: r.cursor,
-                              state_ptr: r.state_ptr.clone(),
-                              metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
-                              created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
-    Ok((bytes, meta))
+    let fid = flow_id.to_string();
+    let c: i64 = map_db_err(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid)).count().get_result(&mut conn))?;
+    Ok(c)
   }
-  fn save_snapshot(&self,
-                   flow_id_in: &Uuid,
-                   cursor_in: i64,
-                   state_ptr_in: &str,
-                   metadata_in: serde_json::Value)
-                   -> FlowResult<Uuid> {
-    use schema::snapshots::dsl::*;
+
+  async fn delete_data_from_cursor(&self, flow_id: &Uuid, from_cursor: i64) -> FlowResult<()> {
     let mut conn = self.conn()?;
-    let new_id = Uuid::new_v4();
-    let now_ts = Utc::now().timestamp();
-    let snap = SnapshotRow { id: new_id.to_string(),
-                             flow_id: flow_id_in.to_string(),
-                             cursor: cursor_in,
-                             state_ptr: state_ptr_in.to_string(),
-                             metadata: metadata_in.to_string(),
-                             created_at_ts: now_ts };
-    diesel::insert_into(snapshots).values(&snap).execute(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-    Ok(new_id)
+    let fid = flow_id.to_string();
+    conn.transaction::<(), diesel::result::Error, _>(|conn| {
+      // Delete flow_data with cursor >= from_cursor
+      diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(from_cursor)))).execute(conn)?;
+      // Update current_cursor to max remaining cursor or 0
+      let new_cursor_opt: Option<i64> = data_dsl::flow_data
+        .filter(data_dsl::flow_id.eq(&fid))
+        .select(diesel::dsl::max(data_dsl::cursor))
+        .first::<Option<i64>>(conn)?;
+      let new_cursor = new_cursor_opt.unwrap_or(0);
+      diesel::update(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)))
+        .set(flows_dsl::current_cursor.eq(new_cursor))
+        .execute(conn)?;
+      Ok(())
+    }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
   }
-  fn create_branch(&self, parent_flow_id: &Uuid, parent_cursor: i64, metadata_in: JsonValue) -> FlowResult<Uuid> {
+
+  async fn content_exists(&self, _content_hash: &str) -> FlowResult<bool> {
+    // This is a simplified implementation - in practice you'd need to store hashes
+    // For now, just return false to indicate no duplicate checking
+    Ok(false)
+  }
+}
+
+#[async_trait]
+impl BranchManagementPort for DieselFlowRepository {
+  async fn create_branch(&self, parent_flow_id: &Uuid, parent_cursor: i64, metadata: JsonValue) -> FlowResult<Uuid> {
     let mut conn = self.conn()?;
     conn.transaction::<Uuid, diesel::result::Error, _>(|conn| {
           let new_id = Uuid::new_v4();
-          let meta_s = metadata_in.to_string();
+          let meta_s = metadata.to_string();
           let now_ts = Utc::now().timestamp();
           let parent_id_s = parent_flow_id.to_string();
           let rows = data_dsl::flow_data.filter(data_dsl::flow_id.eq(&parent_id_s).and(data_dsl::cursor.le(parent_cursor)))
@@ -391,10 +446,7 @@ impl FlowRepository for DieselFlowRepository {
           let snaps = snaps_dsl::snapshots.filter(snaps_dsl::flow_id.eq(&parent_id_s)
                                                                     .and(snaps_dsl::cursor.le(parent_cursor)))
                                           .load::<SnapshotRow>(conn)?;
-          let _copied_count = rows.len() as i64;
-          //el nombre y status de la nueva rama son los mismos que los del padre el
-          // nombre_branch para eso consultamos al padre y verificamos su nombre
-          // y status y que exista
+          // Get parent flow info
           let parent_flow =
             flows_dsl::flows.select(FlowRow::as_select()).filter(flows_dsl::id.eq(&parent_id_s)).first::<FlowRow>(conn)?;
           let status_in = parent_flow.status;
@@ -434,24 +486,180 @@ impl FlowRepository for DieselFlowRepository {
         })
         .map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
   }
-  fn branch_exists(&self, flow_id: &Uuid) -> FlowResult<bool> {
+
+  async fn delete_branch(&self, flow_id: &Uuid, recursive: bool) -> FlowResult<()> {
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+
+    if recursive {
+      // Find child flows and delete them recursively
+      let child_rows: Vec<FlowRow> = map_db_err(flows_dsl::flows.select(FlowRow::as_select())
+                                                                .filter(flows_dsl::parent_flow_id.eq(Some(fid.clone())))
+                                                                .load::<FlowRow>(&mut conn))?;
+      for child in child_rows {
+        if let Ok(child_uuid) = Uuid::parse_str(&child.id) {
+          BranchManagementPort::delete_branch(self, &child_uuid, true).await?;
+        }
+      }
+    }
+
+    // Delete data, snapshots and flow
+    conn.transaction::<(), diesel::result::Error, _>(|conn| {
+          diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
+          diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
+          Ok(())
+        })
+        .map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
+  }
+
+  async fn list_child_branches(&self, parent_flow_id: &Uuid) -> FlowResult<Vec<Uuid>> {
+    let mut conn = self.conn()?;
+    let parent_id_s = parent_flow_id.to_string();
+    let rows = map_db_err(flows_dsl::flows.select(flows_dsl::id)
+                                          .filter(flows_dsl::parent_flow_id.eq(Some(parent_id_s)))
+                                          .load::<String>(&mut conn))?;
+    let mut out = Vec::new();
+    for s in rows {
+      if let Ok(u) = Uuid::parse_str(&s) {
+        out.push(u);
+      }
+    }
+    Ok(out)
+  }
+
+  async fn get_branch_info(&self, flow_id: &Uuid) -> FlowResult<Option<BranchInfo>> {
+    let mut conn = self.conn()?;
+    let fid = flow_id.to_string();
+    let row_opt = flows_dsl::flows.select(FlowRow::as_select())
+                                  .filter(flows_dsl::id.eq(&fid))
+                                  .first::<FlowRow>(&mut conn)
+                                  .optional()
+                                  .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    if let Some(row) = row_opt {
+      let info = BranchInfo { flow_id: *flow_id,
+                              parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
+                              parent_cursor: row.parent_cursor,
+                              created_at: Utc.timestamp_opt(row.created_at_ts, 0).single().unwrap_or(Utc::now()),
+                              metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})) };
+      Ok(Some(info))
+    } else {
+      Ok(None)
+    }
+  }
+
+  async fn branch_exists(&self, flow_id: &Uuid) -> FlowResult<bool> {
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
     let c: i64 = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid)).count().get_result(&mut conn))?;
     Ok(c > 0)
   }
-  fn get_flow_status(&self, flow_id: &Uuid) -> FlowResult<Option<String>> {
-    use schema::flows::dsl::*;
+}
+
+#[async_trait]
+impl SnapshotPort for DieselFlowRepository {
+  async fn save_snapshot(&self,
+                         flow_id_param: &Uuid,
+                         cursor_param: i64,
+                         state_ptr_param: &str,
+                         metadata_param: JsonValue)
+                         -> FlowResult<Uuid> {
+    use schema::snapshots::dsl::*;
     let mut conn = self.conn()?;
-    let fid = flow_id.to_string();
-    let row_opt = flows.select(status)
-                       .filter(id.eq(&fid))
-                       .first::<Option<String>>(&mut conn)
-                       .optional()
-                       .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-    Ok(row_opt.flatten())
+    let new_id = Uuid::new_v4();
+    let now_ts = Utc::now().timestamp();
+    let snap = SnapshotRow { id: new_id.to_string(),
+                             flow_id: flow_id_param.to_string(),
+                             cursor: cursor_param,
+                             state_ptr: state_ptr_param.to_string(),
+                             metadata: metadata_param.to_string(),
+                             created_at_ts: now_ts };
+    diesel::insert_into(snapshots).values(&snap).execute(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    Ok(new_id)
   }
-  fn get_meta(&self, flow_id: &Uuid, key: &str) -> FlowResult<serde_json::Value> {
+
+  async fn load_latest_snapshot(&self, flow_id_param: &Uuid) -> FlowResult<Option<SnapshotMeta>> {
+    use schema::snapshots::dsl::*;
+    let mut conn = self.conn()?;
+    let fid_s = flow_id_param.to_string();
+    let row_opt = snapshots.filter(flow_id.eq(&fid_s))
+                           .order((cursor.desc(), created_at_ts.desc()))
+                           .first::<SnapshotRow>(&mut conn)
+                           .optional()
+                           .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    if let Some(r) = row_opt {
+      let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
+                                flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
+                                cursor: r.cursor,
+                                state_ptr: r.state_ptr.clone(),
+                                metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
+                                created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
+      Ok(Some(meta))
+    } else {
+      Ok(None)
+    }
+  }
+
+  async fn load_snapshot(&self, snapshot_id: &Uuid) -> FlowResult<(Vec<u8>, SnapshotMeta)> {
+    use schema::snapshots::dsl::*;
+    let mut conn = self.conn()?;
+    let sid = snapshot_id.to_string();
+    let r =
+      snapshots.filter(id.eq(&sid)).first::<SnapshotRow>(&mut conn).map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    let bytes = self.load(&r.state_ptr)?;
+    let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
+                              flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
+                              cursor: r.cursor,
+                              state_ptr: r.state_ptr.clone(),
+                              metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
+                              created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
+    Ok((bytes, meta))
+  }
+
+  async fn list_snapshots(&self, flow_id_param: &Uuid) -> FlowResult<Vec<SnapshotMeta>> {
+    use schema::snapshots::dsl::*;
+    let mut conn = self.conn()?;
+    let fid_s = flow_id_param.to_string();
+    let rows = map_db_err(snapshots.filter(flow_id.eq(&fid_s)).order(created_at_ts.desc()).load::<SnapshotRow>(&mut conn))?;
+    let mut out = Vec::new();
+    for r in rows {
+      let meta = SnapshotMeta { id: Uuid::parse_str(&r.id).unwrap(),
+                                flow_id: Uuid::parse_str(&r.flow_id).unwrap(),
+                                cursor: r.cursor,
+                                state_ptr: r.state_ptr.clone(),
+                                metadata: serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({})),
+                                created_at: Utc.timestamp_opt(r.created_at_ts, 0).single().unwrap_or(Utc::now()) };
+      out.push(meta);
+    }
+    Ok(out)
+  }
+
+  async fn cleanup_old_snapshots(&self, flow_id_param: &Uuid, keep_latest: usize) -> FlowResult<()> {
+    use schema::snapshots::dsl::*;
+    let mut conn = self.conn()?;
+    let fid_s = flow_id_param.to_string();
+
+    // Get all snapshots ordered by creation time desc
+    let all_snapshots =
+      map_db_err(snapshots.filter(flow_id.eq(&fid_s)).order(created_at_ts.desc()).load::<SnapshotRow>(&mut conn))?;
+
+    if all_snapshots.len() > keep_latest {
+      // Delete older snapshots
+      let to_delete = &all_snapshots[keep_latest..];
+      for snap in to_delete {
+        // Also delete the file
+        let _ = self.delete_snapshot_file(&snap.state_ptr);
+        map_db_err(diesel::delete(snapshots.filter(id.eq(&snap.id))).execute(&mut conn))?;
+      }
+    }
+
+    Ok(())
+  }
+}
+
+#[async_trait]
+impl MetadataPort for DieselFlowRepository {
+  async fn get_metadata(&self, flow_id: &Uuid, key: &str) -> FlowResult<JsonValue> {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
@@ -461,13 +669,14 @@ impl FlowRepository for DieselFlowRepository {
                    .optional()
                    .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
     if let Some(meta_s) = row {
-      let meta_json: serde_json::Value = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
-      Ok(meta_json.get(key).cloned().unwrap_or(serde_json::Value::Null))
+      let meta_json: JsonValue = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
+      Ok(meta_json.get(key).cloned().unwrap_or(JsonValue::Null))
     } else {
       Err(FlowError::NotFound(format!("flow {}", flow_id)))
     }
   }
-  fn set_meta(&self, flow_id: &Uuid, key: &str, value: serde_json::Value) -> FlowResult<()> {
+
+  async fn set_metadata(&self, flow_id: &Uuid, key: &str, value: JsonValue) -> FlowResult<()> {
     use diesel::prelude::*;
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
@@ -479,7 +688,7 @@ impl FlowRepository for DieselFlowRepository {
                        .optional()
                        .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
     if let Some(mut meta_s) = current {
-      let mut meta_json: serde_json::Value = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
+      let mut meta_json: JsonValue = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
       if !meta_json.is_object() {
         meta_json = serde_json::json!({});
       }
@@ -493,7 +702,8 @@ impl FlowRepository for DieselFlowRepository {
       Err(FlowError::NotFound(format!("flow {}", flow_id)))
     }
   }
-  fn del_meta(&self, flow_id: &Uuid, key: &str) -> FlowResult<()> {
+
+  async fn delete_metadata(&self, flow_id: &Uuid, key: &str) -> FlowResult<()> {
     use diesel::prelude::*;
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
@@ -504,7 +714,7 @@ impl FlowRepository for DieselFlowRepository {
                        .optional()
                        .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
     if let Some(mut meta_s) = current {
-      let mut meta_json: serde_json::Value = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
+      let mut meta_json: JsonValue = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
       if let Some(obj) = meta_json.as_object_mut() {
         obj.remove(key);
       }
@@ -515,96 +725,168 @@ impl FlowRepository for DieselFlowRepository {
       Err(FlowError::NotFound(format!("flow {}", flow_id)))
     }
   }
-  fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> FlowResult<FlowMeta> {
-    use diesel::prelude::*;
+
+  async fn list_metadata_keys(&self, flow_id: &Uuid) -> FlowResult<Vec<String>> {
     use schema::flows::dsl::*;
     let mut conn = self.conn()?;
     let fid = flow_id.to_string();
-    map_db_err(diesel::update(flows.filter(id.eq(&fid))).set(status.eq(new_status.clone())).execute(&mut conn))?;
-    let row = map_db_err(flows.select(FlowRow::as_select()).filter(id.eq(&fid)).first::<FlowRow>(&mut conn))?;
-    Ok(FlowMeta { id: Uuid::parse_str(&row.id).unwrap(),
-                  name: row.name,
-                  status: row.status,
-                  created_by: row.created_by,
-                  created_at: Utc.timestamp_opt(row.created_at_ts, 0).single().unwrap_or(Utc::now()),
-                  current_cursor: row.current_cursor,
-                  current_version: row.current_version,
-                  parent_flow_id: row.parent_flow_id.and_then(|s| Uuid::parse_str(&s).ok()),
-                  parent_cursor: row.parent_cursor,
-                  metadata: serde_json::from_str(&row.metadata).unwrap_or(serde_json::json!({})) })
-  }
-  fn count_steps(&self, flow_id: &Uuid) -> FlowResult<i64> {
-    use schema::flows::dsl as flows_dsl_local;
-    let mut conn = self.conn()?;
-    let fid = flow_id.to_string();
-    // Obtener el current_cursor del flujo (si no existe devolvemos -1)
-    let parent_row = flows_dsl_local::flows.select(FlowRow::as_select())
-                                           .filter(flows_dsl_local::id.eq(&fid))
-                                           .first::<FlowRow>(&mut conn)
-                                           .optional()
-                                           .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
-    if let Some(row) = parent_row {
-      let current_cursor = row.current_cursor;
-      let c: i64 = map_db_err(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid)
-                                                                          .and(data_dsl::cursor.le(current_cursor)))
-                                                 .count()
-                                                 .get_result(&mut conn))?;
-      Ok(c)
-    } else {
-      Ok(-1)
-    }
-  }
-  fn list_flow_ids(&self) -> FlowResult<Vec<Uuid>> {
-    use schema::flows::dsl::*;
-    let mut conn = self.conn()?;
-    let rows = map_db_err(flows.select(id).load::<String>(&mut conn))?;
-    let mut out = Vec::new();
-    for s in rows {
-      if let Ok(u) = Uuid::parse_str(&s) {
-        out.push(u);
+    let row = flows.select(metadata)
+                   .filter(id.eq(&fid))
+                   .first::<String>(&mut conn)
+                   .optional()
+                   .map_err(|e| FlowError::Storage(format!("db: {}", e)))?;
+    if let Some(meta_s) = row {
+      let meta_json: JsonValue = serde_json::from_str(&meta_s).unwrap_or(serde_json::json!({}));
+      if let Some(obj) = meta_json.as_object() {
+        Ok(obj.keys().cloned().collect())
+      } else {
+        Ok(Vec::new())
       }
+    } else {
+      Err(FlowError::NotFound(format!("flow {}", flow_id)))
     }
-    Ok(out)
   }
-  fn delete_branch(&self, flow_id: &Uuid) -> FlowResult<()> {
+}
+
+#[async_trait]
+impl OutboundFlowRepository for DieselFlowRepository {
+  async fn create_flow_with_initial_data(&self, metadata: FlowMetadata, initial_data: FlowData) -> FlowResult<Uuid> {
     let mut conn = self.conn()?;
-    let fid = flow_id.to_string();
-    // Importante: NO eliminar ramas hijas al borrar una rama padre.
-    // Las ramas son clones independientes a partir de parent_cursor, por lo que
-    // deben preservarse aunque se elimine el padre. Solo se eliminan los datos
-    // del flujo indicado.
-    // ahora eliminar datos, snapshots y metadata del flujo
-    conn.transaction::<(), diesel::result::Error, _>(|conn| {
-          diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid))).execute(conn)?;
-          diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid))).execute(conn)?;
-          diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))).execute(conn)?;
-          Ok(())
+    let flow_id = metadata.id;
+
+    conn.transaction::<Uuid, diesel::result::Error, _>(|conn| {
+          // Create flow
+          let meta_s = metadata.metadata.to_string();
+          let flow_row = FlowRow { id: flow_id.to_string(),
+                                   name: metadata.name,
+                                   status: metadata.status,
+                                   created_by: metadata.created_by,
+                                   created_at_ts: metadata.created_at.timestamp(),
+                                   current_cursor: metadata.current_cursor,
+                                   current_version: metadata.current_version,
+                                   parent_flow_id: metadata.parent_flow_id.map(|u| u.to_string()),
+                                   parent_cursor: metadata.parent_cursor,
+                                   metadata: meta_s };
+          diesel::insert_into(flows_dsl::flows).values(&flow_row).execute(conn)?;
+
+          // Insert initial data
+          let data_row = FlowDataRow { id: initial_data.id.to_string(),
+                                       flow_id: initial_data.flow_id.to_string(),
+                                       cursor: initial_data.cursor,
+                                       key: initial_data.key.clone(),
+                                       payload: initial_data.payload.to_string(),
+                                       metadata: initial_data.metadata.to_string(),
+                                       command_id: initial_data.command_id.map(|u| u.to_string()),
+                                       created_at_ts: initial_data.created_at.timestamp() };
+          diesel::insert_into(data_dsl::flow_data).values(&data_row).execute(conn)?;
+
+          Ok(flow_id)
         })
         .map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
   }
-  fn delete_from_step(&self, _flow_id: &Uuid, _from_cursor: i64) -> FlowResult<()> {
-    // Behavior:
-    // - keep steps with cursor < from_cursor
-    // - delete steps with cursor >= from_cursor for the given flow
-    // - delete snapshots with cursor >= from_cursor for the given flow
-    // - find child branches whose parent_cursor >= from_cursor and delete them
-    //   recursively
-    // - update current_cursor to max remaining cursor or 0
+
+  async fn get_repository_stats(&self) -> FlowResult<RepositoryStats> {
     let mut conn = self.conn()?;
-    let fid = _flow_id.to_string();
-    // Ensure flow exists
-    let exists = map_db_err(flows_dsl::flows.filter(flows_dsl::id.eq(&fid))
-                                            .select(flows_dsl::id)
-                                            .first::<String>(&mut conn)
-                                            .optional())?;
-    if exists.is_none() {
-      return Err(FlowError::NotFound(format!("flow {}", _flow_id)));
+
+    let total_flows = map_db_err(flows_dsl::flows.count().get_result::<i64>(&mut conn))? as usize;
+    let total_data_records = map_db_err(data_dsl::flow_data.count().get_result::<i64>(&mut conn))? as usize;
+    let total_snapshots = map_db_err(schema::snapshots::dsl::snapshots.count().get_result::<i64>(&mut conn))? as usize;
+    let total_branches = map_db_err(flows_dsl::flows.filter(flows_dsl::parent_flow_id.is_not_null())
+                                                    .count()
+                                                    .get_result::<i64>(&mut conn))? as usize;
+
+    // For storage size, we'd need to calculate file sizes, but for now return 0
+    let storage_size_bytes = 0u64;
+
+    Ok(RepositoryStats { total_flows, total_data_records, total_snapshots, total_branches, storage_size_bytes })
+  }
+}
+
+impl DieselFlowRepository {
+  fn delete_snapshot_file(&self, state_ptr: &str) -> FlowResult<()> {
+    let path = Path::new(&self.snapshot_dir).join(state_ptr);
+    if path.exists() {
+      fs::remove_file(&path).map_err(|e| FlowError::Storage(format!("delete snapshot file: {}", e)))?;
     }
+    Ok(())
+  }
+}
+
+impl FlowRepository for DieselFlowRepository {
+  fn get_flow_meta(&self, flow_id: &Uuid) -> FlowResult<FlowMeta> {
+    futures::executor::block_on(FlowMetadataPort::get_flow_metadata(self, flow_id))
+  }
+
+  fn create_flow(&self, name: Option<String>, status: Option<String>, metadata: JsonValue) -> FlowResult<Uuid> {
+    let meta = FlowMetadata { id: Uuid::new_v4(),
+                              name,
+                              status,
+                              created_by: None,
+                              created_at: Utc::now(),
+                              current_cursor: 0,
+                              current_version: 0,
+                              parent_flow_id: None,
+                              parent_cursor: None,
+                              metadata };
+    futures::executor::block_on(FlowMetadataPort::create_flow(self, meta))
+  }
+
+  fn persist_data(&self, data: &FlowData, expected_version: i64) -> FlowResult<PersistResult> {
+    futures::executor::block_on(FlowDataPort::persist_data(self, data, expected_version))
+  }
+
+  fn read_data(&self, flow_id: &Uuid, from_cursor: i64) -> FlowResult<Vec<FlowData>> {
+    futures::executor::block_on(FlowDataPort::read_data(self, flow_id, from_cursor))
+  }
+
+  fn load_latest_snapshot(&self, flow_id: &Uuid) -> FlowResult<Option<SnapshotMeta>> {
+    futures::executor::block_on(SnapshotPort::load_latest_snapshot(self, flow_id))
+  }
+
+  fn load_snapshot(&self, snapshot_id: &Uuid) -> FlowResult<(Vec<u8>, SnapshotMeta)> {
+    futures::executor::block_on(SnapshotPort::load_snapshot(self, snapshot_id))
+  }
+
+  fn save_snapshot(&self, flow_id: &Uuid, cursor: i64, state_ptr: &str, metadata: JsonValue) -> FlowResult<Uuid> {
+    futures::executor::block_on(SnapshotPort::save_snapshot(self, flow_id, cursor, state_ptr, metadata))
+  }
+
+  fn create_branch(&self, parent_flow_id: &Uuid, parent_cursor: i64, metadata: JsonValue) -> FlowResult<Uuid> {
+    futures::executor::block_on(BranchManagementPort::create_branch(self, parent_flow_id, parent_cursor, metadata))
+  }
+
+  fn branch_exists(&self, flow_id: &Uuid) -> FlowResult<bool> {
+    futures::executor::block_on(BranchManagementPort::branch_exists(self, flow_id))
+  }
+
+  fn count_steps(&self, flow_id: &Uuid) -> FlowResult<i64> {
+    let meta = futures::executor::block_on(FlowMetadataPort::get_flow_metadata(self, flow_id))?;
+    Ok(meta.current_cursor)
+  }
+
+  fn delete_branch(&self, flow_id: &Uuid) -> FlowResult<()> {
+    // Only delete the branch itself, not recursively
+    futures::executor::block_on(BranchManagementPort::delete_branch(self, flow_id, false))
+  }
+
+  fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> FlowResult<()> {
+    // Custom logic: delete child branches whose parent_cursor >= from_cursor
+    let mut conn = self.conn().map_err(|e| FlowError::Storage(format!("pool: {}", e)))?;
+    let fid = flow_id.to_string();
     conn.transaction::<(), diesel::result::Error, _>(|conn| {
       // Delete flow_data with cursor >= from_cursor
-      diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(_from_cursor)))).execute(conn)?;
-      // Delete snapshots with cursor >= from_cursor
-      diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&fid).and(schema::snapshots::dsl::cursor.ge(_from_cursor)))).execute(conn)?;
+      diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&fid).and(data_dsl::cursor.ge(from_cursor)))).execute(conn)?;
+      // Delete child branches whose parent_cursor >= from_cursor
+      let child_rows: Vec<FlowRow> = flows_dsl::flows
+        .select(FlowRow::as_select())
+        .filter(flows_dsl::parent_flow_id.eq(Some(fid.clone())))
+        .filter(flows_dsl::parent_cursor.ge(from_cursor))
+        .load::<FlowRow>(conn)?;
+      for child in child_rows {
+        diesel::delete(flows_dsl::flows.filter(flows_dsl::id.eq(&child.id))).execute(conn)?;
+        diesel::delete(data_dsl::flow_data.filter(data_dsl::flow_id.eq(&child.id))).execute(conn)?;
+        diesel::delete(schema::snapshots::dsl::snapshots.filter(schema::snapshots::dsl::flow_id.eq(&child.id))).execute(conn)?;
+      }
       // Update current_cursor to max remaining cursor or 0
       let new_cursor_opt: Option<i64> = data_dsl::flow_data
         .filter(data_dsl::flow_id.eq(&fid))
@@ -615,27 +897,57 @@ impl FlowRepository for DieselFlowRepository {
         .set(flows_dsl::current_cursor.eq(new_cursor))
         .execute(conn)?;
       Ok(())
-    }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))?;
-    // Find child flows whose parent_cursor >= from_cursor and collect their ids
-    let child_rows: Vec<FlowRow> =
-      map_db_err(flows_dsl::flows.select(FlowRow::as_select())
-                                 .filter(flows_dsl::parent_flow_id.eq(Some(fid.clone()))
-                                                                  .and(flows_dsl::parent_cursor.ge(_from_cursor)))
-                                 .load::<FlowRow>(&mut conn))?;
-    // For each child, call delete_branch to remove subtree
-    for child in child_rows {
-      if let Ok(child_uuid) = Uuid::parse_str(&child.id) {
-        // delete_branch is transactional on its own
-        self.delete_branch(&child_uuid)?;
-      }
-    }
-    Ok(())
+    }).map_err(|e| FlowError::Storage(format!("db txn: {}", e)))
   }
+
   fn lock_for_update(&self, _flow_id: &Uuid, _expected_version: i64) -> FlowResult<bool> {
+    // Simple optimistic lock: rely on expected_version checks in persist_data
     Ok(true)
   }
+
   fn claim_work(&self, _worker_id: &str) -> FlowResult<Option<WorkItem>> {
     Ok(None)
+  }
+
+  fn get_flow_status(&self, flow_id: &Uuid) -> FlowResult<Option<String>> {
+    futures::executor::block_on(FlowMetadataPort::get_flow_status(self, flow_id))
+  }
+
+  fn set_flow_status(&self, flow_id: &Uuid, new_status: Option<String>) -> FlowResult<FlowMeta> {
+    // Read, modify, update, then return updated metadata
+    let mut meta = futures::executor::block_on(FlowMetadataPort::get_flow_metadata(self, flow_id))?;
+    meta.status = new_status;
+    futures::executor::block_on(FlowMetadataPort::update_flow_metadata(self, flow_id, meta.clone()))?;
+    Ok(meta)
+  }
+
+  fn get_meta(&self, flow_id: &Uuid, key: &str) -> FlowResult<JsonValue> {
+    futures::executor::block_on(MetadataPort::get_metadata(self, flow_id, key))
+  }
+
+  fn set_meta(&self, flow_id: &Uuid, key: &str, value: JsonValue) -> FlowResult<()> {
+    futures::executor::block_on(MetadataPort::set_metadata(self, flow_id, key, value))
+  }
+
+  fn del_meta(&self, flow_id: &Uuid, key: &str) -> FlowResult<()> {
+    futures::executor::block_on(MetadataPort::delete_metadata(self, flow_id, key))
+  }
+
+  fn list_flow_ids(&self) -> FlowResult<Vec<Uuid>> {
+    futures::executor::block_on(FlowMetadataPort::list_flow_ids(self))
+  }
+
+  fn dump_tables_for_debug(&self) -> FlowResult<(Vec<FlowMeta>, Vec<FlowData>)> {
+    let ids = futures::executor::block_on(FlowMetadataPort::list_flow_ids(self))?;
+    let mut metas = Vec::new();
+    let mut all_data = Vec::new();
+    for id in ids.iter() {
+      let meta = futures::executor::block_on(FlowMetadataPort::get_flow_metadata(self, id))?;
+      metas.push(meta);
+      let data = futures::executor::block_on(FlowDataPort::read_data(self, id, 0))?;
+      all_data.extend(data);
+    }
+    Ok((metas, all_data))
   }
 }
 impl SnapshotStore for DieselFlowRepository {

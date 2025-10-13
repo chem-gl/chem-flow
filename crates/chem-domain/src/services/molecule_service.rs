@@ -21,7 +21,7 @@ impl<R> MoleculeService<R> where R: MoleculeReader + MoleculeWriter + FamilyRepo
   /// Validates the molecule structure and saves it to the repository.
   /// Returns the InChIKey of the created molecule.
   pub fn create_molecule(&self, inchikey: &str, smiles: &str, inchi: &str, metadata: Value) -> Result<String, DomainError> {
-    let molecule = Molecule::from_parts(inchikey, smiles, inchi, metadata)?;
+    let molecule = Molecule::from_simple_parts(inchikey, smiles, inchi, metadata)?;
     // Validate molecule structure
     self.validate_molecule_structure(&molecule)?;
     self.repository.save_molecule(molecule)
@@ -104,10 +104,10 @@ mod tests {
     let repo = InMemoryDomainRepository::new();
     let service = MoleculeService::new(repo);
     // Create molecule
-    let molecule = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({})).unwrap();
+    let molecule = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({})).unwrap();
     let mol_inchikey = MoleculeWriter::save_molecule(&service.repository, molecule.clone()).unwrap();
     // Create family with molecule
     let family = MoleculeFamily::new(vec![molecule], json!({})).unwrap();
@@ -121,10 +121,10 @@ mod tests {
   fn test_validate_molecule_structure() {
     let repo = InMemoryDomainRepository::new();
     let service = MoleculeService::new(repo);
-    let molecule = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({})).unwrap();
+    let molecule = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({})).unwrap();
     assert!(service.validate_molecule_structure(&molecule).unwrap());
   }
 }

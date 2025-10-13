@@ -2,8 +2,9 @@
 //!
 //! Los use cases encapsulan la lógica de aplicación y orquestan las
 //! operaciones del dominio a través de los puertos.
+use crate::domain::entities::{Molecule, MoleculeFamily};
 use crate::ports::{FamilyRepository, MoleculeReader, MoleculeWriter, PropertyRepository};
-use crate::{DomainError, Molecule, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty};
+use crate::{DomainError, OwnedFamilyProperty, OwnedMolecularProperty};
 use uuid::Uuid;
 // ============================================================================
 // MOLECULE USE CASES
@@ -191,10 +192,10 @@ mod tests {
   fn test_create_molecule_use_case() {
     let repo = InMemoryDomainRepository::new();
     let use_case = CreateMoleculeUseCase::new(repo);
-    let molecule = Molecule::from_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({})).unwrap();
+    let molecule = Molecule::from_simple_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({})).unwrap();
     let result = use_case.execute(molecule);
     assert!(result.is_ok());
   }
@@ -203,10 +204,10 @@ mod tests {
     let repo = InMemoryDomainRepository::new();
     let create_uc = CreateMoleculeUseCase::new(repo.clone());
     let get_uc = GetMoleculeUseCase::new(repo);
-    let molecule = Molecule::from_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({})).unwrap();
+    let molecule = Molecule::from_simple_parts("AAAAAAAAAAAAAA-BBBBBBBBBB-C",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({})).unwrap();
     let inchikey = create_uc.execute(molecule).unwrap();
     let result = get_uc.execute(&inchikey);
     assert!(result.is_ok());

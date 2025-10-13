@@ -74,24 +74,27 @@ impl ChemEngineInterface for ChemEngine {
       if smiles.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
-      // Genera un InChIKey pseudo-válido (14-10-1, A-Z y 0-9)
+      // Genera un InChIKey pseudo-válido (14-10-1) usando sólo letras A-Z en las dos
+      // primeras partes para cumplir con la validación del dominio; la tercera
+      // parte será 'N'.
       fn mock_inchikey(seed: &str) -> String {
         let bytes = seed.as_bytes();
         let mut out: Vec<char> = Vec::with_capacity(25);
         let target_len = 25; // 14 + 10 + 1
         for i in 0..target_len {
           let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(11) };
-          let v = b % 36;
-          let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
+          let v = b % 26; // sólo letras
+          let ch = (b'A' + v) as char;
           out.push(ch);
         }
         let s1: String = out.iter().take(14).collect();
         let s2: String = out.iter().skip(14).take(10).collect();
-        let s3: String = out.iter().skip(24).take(1).collect();
+        let s3: String = "N".to_string();
         format!("{}-{}-{}", s1, s2, s3)
       }
       Ok(Molecule { inchikey: mock_inchikey(smiles),
-                    inchi: format!("InChI=MOCK/{}", smiles),
+                    // Ensure InChI molecular formula matches stored formula
+                    inchi: "InChI=1S/C".to_string(),
                     smiles: smiles.to_string(),
                     num_atoms: 1,
                     mol_weight: 12.01,
@@ -135,18 +138,19 @@ impl ChemEngineInterface for ChemEngine {
         let target_len = 25; // 14 + 10 + 1
         for i in 0..target_len {
           let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(7) };
-          let v = b % 36;
-          let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
+          let v = b % 26; // sólo letras
+          let ch = (b'A' + v) as char;
           out.push(ch);
         }
         let s1: String = out.iter().take(14).collect();
         let s2: String = out.iter().skip(14).take(10).collect();
-        let s3: String = out.iter().skip(24).take(1).collect();
+        let s3: String = "N".to_string();
         format!("{}-{}-{}", s1, s2, s3)
       }
       let combined = format!("{}+{}", smiles_a, smiles_b);
       Ok(Molecule { inchikey: mock_inchikey(&combined),
-                    inchi: format!("InChI=MOCK/FUSED/{}-{}", smiles_a, smiles_b),
+                    // Ensure InChI molecular formula matches stored formula
+                    inchi: "InChI=1S/C2".to_string(),
                     smiles: format!("{}.{}", smiles_a, smiles_b),
                     num_atoms: 2,
                     mol_weight: 24.02,
@@ -216,7 +220,7 @@ mod tests {
     // Mock InChIKey has format: XXXXXXXXXXXXXX-XXXXXXXXXX-X (14-10-1)
     assert_eq!(molecule.inchikey.len(), 27); // 14 + 1 + 10 + 1 + 1
     assert_eq!(molecule.inchikey.chars().filter(|c| *c == '-').count(), 2);
-    assert!(molecule.inchi.starts_with("InChI=MOCK/"));
+    assert!(molecule.inchi.starts_with("InChI=1S/"));
   }
   #[test]
   #[cfg(not(feature = "python"))]
@@ -227,6 +231,6 @@ mod tests {
     // Mock InChIKey has format: XXXXXXXXXXXXXX-XXXXXXXXXX-X (14-10-1)
     assert_eq!(result.inchikey.len(), 27);
     assert_eq!(result.inchikey.chars().filter(|c| *c == '-').count(), 2);
-    assert!(result.inchi.starts_with("InChI=MOCK/FUSED/"));
+    assert!(result.inchi.starts_with("InChI=1S/"));
   }
 }

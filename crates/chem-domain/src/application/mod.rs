@@ -1,16 +1,60 @@
 //! # Application Layer
 //!
-//! Esta capa contiene los casos de uso (use cases) que orquestan la lógica
-//! de negocio del dominio. Los use cases son el punto de entrada para las
-//! operaciones de la aplicación y coordinan las interacciones entre los
-//! servicios de dominio y los puertos.
+//! The application layer orchestrates domain operations and implements use
+//! cases. It follows CQRS (Command Query Responsibility Segregation) and
+//! coordinates between the domain layer and external ports.
 //!
-//! ## Principios de Diseño
-//! - Use cases independientes y componibles
-//! - Validación de entrada en el boundary
-//! - Manejo exhaustivo de errores
-//! - Sin dependencias de infraestructura
+//! ## Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────┐
+//! │                Application Layer                        │
+//! │                                                         │
+//! │  📝 Commands                    📊 Queries              │
+//! │  ├── CreateMoleculeFromSmiles   ├── GetMoleculeById     │
+//! │  ├── UpdateMoleculeMetadata     ├── SearchBySmiles      │
+//! │  └── DeleteMolecule             └── ListMolecules       │
+//! │                                                         │
+//! │  🎯 Use Cases (Application Services)                    │
+//! │  ├── MoleculeCommandHandler                             │
+//! │  ├── MoleculeQueryHandler                               │
+//! │  └── PropertyCalculationService                         │
+//! │                                                         │
+//! │  ⬇️ Dependencies (Injected via Ports)                   │
+//! │  ├── MoleculeRepository                                 │
+//! │  ├── PropertyCalculator                                 │
+//! │  └── EventPublisher                                     │
+//! └─────────────────────────────────────────────────────────┘
+//! ```
+//!
+//! ## Design Principles
+//!
+//! - **Single Responsibility**: Each use case handles one business operation
+//! - **Command/Query Separation**: Clear separation between reads and writes
+//! - **Dependency Inversion**: Use cases depend on ports, not implementations
+//! - **Event-Driven**: Publish domain events for integration
+//!
+//! ## Usage
+//!
+//! ```rust,no_run
+//! use chem_domain::application::*;
+//!
+//! // Command (Write Operation)
+//! let command = CreateMoleculeFromSmiles::new("CCO")
+//!     .with_metadata(serde_json::json!({"name": "ethanol"}));
+//!
+//! // Query (Read Operation)
+//! let query = GetMoleculeByInChIKey::new("LFQSCWFLJHTTHZ-UHFFFAOYSA-N")
+//!     .with_properties();
+//! ```
+
+pub mod commands;
+pub mod queries;
 pub mod use_cases;
+
+// Re-exports for convenience
+pub use commands::*;
+pub use queries::*;
 pub use use_cases::{
   AddMoleculeToFamilyUseCase, CreateFamilyUseCase, CreateMoleculeUseCase, DeleteFamilyUseCase, DeleteMoleculeUseCase,
   GetFamilyPropertiesUseCase, GetFamilyUseCase, GetMolecularPropertiesUseCase, GetMoleculeUseCase, ListFamiliesUseCase,

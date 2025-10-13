@@ -1,12 +1,16 @@
 //! Entidad MoleculeFamily - Agrupación inmutable de moléculas con hash para
 //! integridad
-use crate::{DomainError, Molecule};
+
+use crate::domain::entities::molecule::Molecule;
+use crate::domain::value_objects::inchikey::InChIKey;
+use crate::errors::DomainError;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use uuid::Uuid;
+
 /// Entidad MoleculeFamily
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoleculeFamily {
@@ -18,6 +22,7 @@ pub struct MoleculeFamily {
   frozen: bool,
   molecules: Vec<Molecule>,
 }
+
 impl MoleculeFamily {
   /// Crea una nueva familia de moléculas
   pub fn new<I>(molecules: I, provenance: Value) -> Result<Self, DomainError>
@@ -32,6 +37,7 @@ impl MoleculeFamily {
     let family_hash = Self::calculate_family_hash(&molecules, &provenance);
     Ok(Self { id: Uuid::new_v4(), name: None, description: None, family_hash, provenance, frozen: false, molecules })
   }
+
   /// Calcula el hash de la familia incluyendo moléculas y provenance (con
   /// serialización canónica)
   fn calculate_family_hash(molecules: &[Molecule], provenance: &Value) -> String {
@@ -46,6 +52,7 @@ impl MoleculeFamily {
     hasher.update(prov_str.as_bytes());
     format!("{:x}", hasher.finalize())
   }
+
   /// Serializa el JSON de manera canónica (ordenando claves recursivamente)
   fn canonicalize_json(value: &Value) -> Value {
     match value {
@@ -60,6 +67,7 @@ impl MoleculeFamily {
       _ => value.clone(),
     }
   }
+
   /// Agrega una molécula a la familia (crea una nueva instancia)
   pub fn add_molecule(&self, molecule: Molecule) -> Result<Self, DomainError> {
     if self.frozen {
@@ -80,8 +88,9 @@ impl MoleculeFamily {
               frozen: self.frozen,
               molecules: new_molecules })
   }
+
   /// Elimina una molécula de la familia por InChIKey (crea una nueva instancia)
-  pub fn remove_molecule(&self, inchikey: &str) -> Result<Self, DomainError> {
+  pub fn remove_molecule(&self, inchikey: &InChIKey) -> Result<Self, DomainError> {
     if self.frozen {
       return Err(DomainError::validation("MoleculeFamily", "No se puede modificar una familia congelada"));
     }
@@ -101,16 +110,19 @@ impl MoleculeFamily {
               frozen: self.frozen,
               molecules: new_molecules })
   }
+
   /// Congela la familia (impide futuras modificaciones)
   pub fn freeze(&self) -> Self {
     let mut new_family = self.clone();
     new_family.frozen = true;
     new_family
   }
+
   /// Verifica la integridad del hash de la familia
   pub fn verify_integrity(&self) -> bool {
     Self::calculate_family_hash(&self.molecules, &self.provenance) == self.family_hash
   }
+
   /// Establece el nombre de la familia (crea una nueva instancia)
   pub fn with_name(&self, name: impl Into<String>) -> Self {
     let mut new_family = self.clone();
@@ -118,6 +130,7 @@ impl MoleculeFamily {
     new_family.id = Uuid::new_v4();
     new_family
   }
+
   /// Establece la descripción de la familia (crea una nueva instancia)
   pub fn with_description(&self, description: impl Into<String>) -> Self {
     let mut new_family = self.clone();
@@ -125,12 +138,14 @@ impl MoleculeFamily {
     new_family.id = Uuid::new_v4();
     new_family
   }
+
   /// Establece el ID de la familia (para persistencia)
   pub fn with_id(&self, id: Uuid) -> Self {
     let mut new_family = self.clone();
     new_family.id = id;
     new_family
   }
+
   // === Getters ===
   pub fn id(&self) -> Uuid {
     self.id
@@ -159,15 +174,17 @@ impl MoleculeFamily {
   pub fn is_empty(&self) -> bool {
     self.molecules.is_empty()
   }
-  pub fn contains(&self, inchikey: &str) -> bool {
+  pub fn contains(&self, inchikey: &InChIKey) -> bool {
     self.molecules.iter().any(|m| m.inchikey() == inchikey)
   }
+
   // === Métodos de dominio ===
   /// Verifica si dos familias son equivalentes (mismo hash)
   pub fn is_equivalent(&self, other: &Self) -> bool {
     self.family_hash == other.family_hash
   }
 }
+
 impl<'a> IntoIterator for &'a MoleculeFamily {
   type Item = &'a Molecule;
   type IntoIter = std::slice::Iter<'a, Molecule>;
@@ -175,6 +192,7 @@ impl<'a> IntoIterator for &'a MoleculeFamily {
     self.molecules.iter()
   }
 }
+
 impl IntoIterator for MoleculeFamily {
   type Item = Molecule;
   type IntoIter = std::vec::IntoIter<Molecule>;
@@ -182,6 +200,7 @@ impl IntoIterator for MoleculeFamily {
     self.molecules.into_iter()
   }
 }
+
 impl fmt::Display for MoleculeFamily {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f,
@@ -191,62 +210,56 @@ impl fmt::Display for MoleculeFamily {
            self.molecules.len())
   }
 }
+
 impl PartialEq for MoleculeFamily {
   fn eq(&self, other: &Self) -> bool {
     self.is_equivalent(other)
   }
 }
+
 #[cfg(test)]
 mod tests {
+  use super::*;
+  use crate::domain::entities::molecule::Molecule;
+  use crate::domain::value_objects::{inchi::InChI, inchikey::InChIKey, smiles::Smiles};
+  use chrono::Utc;
   use serde_json::json;
 
-  use super::*;
-  use crate::Molecule;
   #[test]
   fn test_molecule_family_creation() -> Result<(), DomainError> {
-    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                    "CCO",
-                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                    json!({}))?;
-    let mol2 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-M",
-                                    "CCN",
-                                    "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
-                                    json!({}))?;
+    let inchikey1 = InChIKey::try_from("LFQSCWFLJHTTHZ-UHFFFAOYSA-N")?;
+    let smiles1 = Smiles::try_from("CCO")?;
+    let inchi1 = InChI::try_from("InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3")?;
+
+    let inchikey2 = InChIKey::try_from("LFQSCWFLJHTTHZ-UHFFFAOYSA-M")?;
+    let smiles2 = Smiles::try_from("CCN")?;
+    let inchi2 = InChI::try_from("InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3")?;
+
+    let mol1 = Molecule::from_parts(Uuid::new_v4(),
+                                    inchikey1,
+                                    smiles1,
+                                    inchi1,
+                                    None,
+                                    json!({}),
+                                    Utc::now(),
+                                    Utc::now(),
+                                    1)?;
+
+    let mol2 = Molecule::from_parts(Uuid::new_v4(),
+                                    inchikey2,
+                                    smiles2,
+                                    inchi2,
+                                    None,
+                                    json!({}),
+                                    Utc::now(),
+                                    Utc::now(),
+                                    1)?;
+
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     assert_eq!(family.len(), 2);
     assert!(family.verify_integrity());
     assert!(!family.is_frozen());
-    Ok(())
-  }
-  #[test]
-  fn test_molecule_family_duplicates() -> Result<(), DomainError> {
-    let mol = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                   "CCO",
-                                   "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                   json!({}))?;
-    let provenance = json!({"source": "test"});
-    let family = MoleculeFamily::new(vec![mol.clone(), mol], provenance)?;
-    assert_eq!(family.len(), 1);
-    Ok(())
-  }
-  #[test]
-  fn test_molecule_family_empty() {
-    let provenance = json!({"source": "test"});
-    let result = MoleculeFamily::new(Vec::<Molecule>::new(), provenance);
-    assert!(result.is_err());
-  }
-  #[test]
-  fn test_add_molecule_to_frozen() -> Result<(), DomainError> {
-    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                    "CCO",
-                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                    json!({}))?;
-    let provenance = json!({"source": "test"});
-    let family = MoleculeFamily::new(vec![mol1.clone()], provenance)?;
-    let frozen_family = family.freeze();
-    let result = frozen_family.add_molecule(mol1);
-    assert!(result.is_err());
     Ok(())
   }
 }

@@ -36,7 +36,7 @@ fn molecule_from_smiles(smiles: &str) -> Result<Molecule, Box<dyn Error>> {
                                      mol_weight: provider_mol.mol_weight,
                                      mol_formula: provider_mol.mol_formula,
                                      structure: None /* Por ahora sin estructura detallada */ };
-  Ok(Molecule::from_provider_molecule(smiles, converted)?)
+  Ok(Molecule::from_provider_molecule(converted)?)
 }
 fn prompt(msg: &str) -> Result<String, Box<dyn Error>> {
   print!("{}", msg);
@@ -560,6 +560,66 @@ fn list_families() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
+
+/// Listar familias con detalle de moléculas
+fn list_families_detailed() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  let fams = match repo.list_families() {
+    Ok(f) => f,
+    Err(e) => {
+      println!("Error al listar familias: {}", e);
+      println!("Posible problema de migración de base de datos.");
+      return Ok(());
+    }
+  };
+  
+  if fams.is_empty() {
+    println!("No hay familias en el dominio.");
+    return Ok(());
+  }
+  
+  println!("\n=== Familias encontradas: {} ===", fams.len());
+  for (i, f) in fams.iter().enumerate() {
+    let name = f.name().map(|s| s.to_string()).unwrap_or_else(|| "sin nombre".to_string());
+    println!("\n[{}] Familia: {} (ID: {})", i, name, f.id());
+    println!("    Moléculas ({}): ", f.molecules().len());
+    
+    for (j, mol) in f.molecules().iter().enumerate() {
+      println!("      [{}] InChIKey: {} | SMILES: {}", 
+               j, mol.inchikey(), mol.smiles());
+    }
+  }
+  
+  let view_detail = prompt("\n¿Ver detalle de una familia? (índice o enter para cancelar): ")?;
+  if !view_detail.trim().is_empty() {
+    if let Ok(idx) = view_detail.trim().parse::<usize>() {
+      if idx < fams.len() {
+        let family = &fams[idx];
+        let name = family.name().map(|s| s.to_string()).unwrap_or_else(|| "sin nombre".to_string());
+        println!("\n=== Detalle de Familia: {} ===", name);
+        println!("ID: {}", family.id());
+        println!("\nMoléculas:");
+        
+        for (j, mol) in family.molecules().iter().enumerate() {
+          println!("\n  [{}] Molécula:", j);
+          println!("      InChIKey: {}", mol.inchikey());
+          println!("      SMILES:   {}", mol.smiles());
+          println!("      InChI:    {}", mol.inchi());
+          if let Some(formula) = mol.molecular_formula() {
+            println!("      Fórmula:  {}", formula);
+          }
+          if let Some(weight) = mol.estimated_molecular_weight() {
+            println!("      Peso Mol: {:.2}", weight);
+          }
+        }
+      } else {
+        println!("Índice fuera de rango.");
+      }
+    }
+  }
+  
+  Ok(())
+}
 fn list_flows() -> Result<(), Box<dyn Error>> {
   let repo = new_flow_from_env()?;
   let ids = repo.list_flow_ids()?;
@@ -569,6 +629,171 @@ fn list_flows() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
+/// Ver una molécula y sus propiedades almacenadas (versión interactiva mejorada)
+fn view_molecule_interactive() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  
+  let mols = match repo.list_molecules() {
+    Ok(m) => m,
+    Err(e) => {
+      println!("Error al listar moléculas: {}", e);
+      println!("Posible problema de migración de base de datos.");
+      println!("Intenta recrear la base de datos o ejecuta las migraciones pendientes.");
+      return Ok(());
+    }
+  };
+  
+  if mols.is_empty() {
+    println!("No hay moléculas en el dominio.");
+    return Ok(());
+  }
+  
+  println!("\n=== Moléculas disponibles ({}) ===", mols.len());
+  for (i, m) in mols.iter().enumerate() {
+    let formula = m.molecular_formula().map(|f| f.to_string()).unwrap_or_else(|| "N/A".to_string());
+    let weight = m.estimated_molecular_weight().map(|w| format!("{:.2}", w)).unwrap_or_else(|| "N/A".to_string());
+    println!("  [{}] {} | SMILES: {} | Fórmula: {} | Peso: {}", 
+             i, m.inchikey(), m.smiles(), formula, weight);
+  }
+  
+  let input = prompt("\nSelecciona índice de molécula (o enter para cancelar): ")?;
+  if input.trim().is_empty() {
+    return Ok(());
+  }
+  
+  let idx: usize = input.trim().parse().map_err(|_| "Índice inválido")?;
+  if idx >= mols.len() {
+    println!("Índice fuera de rango.");
+    return Ok(());
+  }
+  
+  let m = &mols[idx];
+  let inchikey = m.inchikey();
+  
+  println!("\n=== Detalle de Molécula ===");
+  println!("InChIKey: {}", m.inchikey());
+  println!("SMILES:   {}", m.smiles());
+  println!("InChI:    {}", m.inchi());
+  if let Some(formula) = m.molecular_formula() {
+    println!("Fórmula:  {}", formula);
+  }
+  if let Some(weight) = m.estimated_molecular_weight() {
+    println!("Peso Mol: {:.2}", weight);
+  }
+  println!("Metadata: {}", serde_json::to_string_pretty(m.metadata()).unwrap_or_else(|_| "{}".to_string()));
+  
+  match repo.get_molecular_properties(inchikey.as_str()) {
+    Ok(props) => {
+      if props.is_empty() {
+        println!("\nNo hay propiedades moleculares registradas.");
+      } else {
+        println!("\n=== Propiedades Moleculares ({}) ===", props.len());
+        for (i, p) in props.iter().enumerate() {
+          let val = serde_json::to_string_pretty(&p.value).unwrap_or_else(|_| "<no-json>".into());
+          println!("  [{}] Tipo: {}", i, p.property_type);
+          println!("      Calidad: {}", p.quality.as_deref().unwrap_or("-"));
+          println!("      Valor: {}", val);
+          println!("      Metadata: {}", serde_json::to_string_pretty(&p.metadata).unwrap_or_default());
+        }
+      }
+    }
+    Err(e) => {
+      println!("\n⚠️  Error obteniendo propiedades: {}", e);
+      println!("Las propiedades no se pudieron cargar, pero la molécula existe.");
+    }
+  }
+  
+  Ok(())
+}
+
+/// Crear familia interactivamente seleccionando moléculas del dominio
+fn create_family_interactive() -> Result<(), Box<dyn Error>> {
+  let repo = new_domain_from_env()?;
+  
+  println!("\n=== Crear nueva familia ===");
+  let family_name = prompt("Nombre de la familia (opcional): ")?;
+  let family_desc = prompt("Descripción de la familia (opcional): ")?;
+  
+  let mols = match repo.list_molecules() {
+    Ok(m) => m,
+    Err(e) => {
+      println!("Error al listar moléculas: {}", e);
+      println!("Posible problema de migración de base de datos.");
+      return Ok(());
+    }
+  };
+  
+  if mols.is_empty() {
+    println!("No hay moléculas disponibles en el dominio.");
+    println!("Crea moléculas primero (opción 13 del menú).");
+    return Ok(());
+  }
+  
+  println!("\n=== Moléculas disponibles ({}) ===", mols.len());
+  for (i, m) in mols.iter().enumerate() {
+    let formula = m.molecular_formula().map(|f| f.to_string()).unwrap_or_else(|| "N/A".to_string());
+    println!("  [{}] {} | SMILES: {} | Fórmula: {}", 
+             i, m.inchikey(), m.smiles(), formula);
+  }
+  
+  println!("\nSelecciona las moléculas para la familia:");
+  println!("  - Ingresa índices separados por comas (ej: 0,2,5)");
+  println!("  - O ingresa 'all' para seleccionar todas");
+  let selection = prompt("Selección: ")?;
+  
+  let selected_mols: Vec<Molecule> = if selection.trim().eq_ignore_ascii_case("all") {
+    mols.clone()
+  } else {
+    let mut selected = Vec::new();
+    for idx_str in selection.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+      match idx_str.parse::<usize>() {
+        Ok(idx) => {
+          if idx < mols.len() {
+            selected.push(mols[idx].clone());
+          } else {
+            println!("Índice {} fuera de rango, ignorado.", idx);
+          }
+        }
+        Err(_) => {
+          println!("'{}' no es un índice válido, ignorado.", idx_str);
+        }
+      }
+    }
+    selected
+  };
+  
+  if selected_mols.is_empty() {
+    println!("No se seleccionaron moléculas válidas; abortando creación de familia.");
+    return Ok(());
+  }
+  
+  println!("\nMoléculas seleccionadas: {}", selected_mols.len());
+  for m in &selected_mols {
+    println!("  - {} ({})", m.smiles(), m.inchikey());
+  }
+  
+  let confirm = prompt("\n¿Confirmar creación de familia? (y/N): ")?;
+  if !matches!(confirm.trim().to_lowercase().as_str(), "y" | "s" | "si" | "yes") {
+    println!("Creación de familia cancelada.");
+    return Ok(());
+  }
+  
+  let mut metadata = serde_json::json!({});
+  if !family_name.trim().is_empty() {
+    metadata["name"] = serde_json::json!(family_name.trim());
+  }
+  if !family_desc.trim().is_empty() {
+    metadata["description"] = serde_json::json!(family_desc.trim());
+  }
+  
+  let fam = MoleculeFamily::new(selected_mols, metadata)?;
+  let family_id = repo.save_family(fam)?;
+  
+  println!("✅ Familia creada exitosamente con ID: {}", family_id);
+  
+  Ok(())
+}
+
 /// Ver una molécula y sus propiedades almacenadas
 fn view_molecule() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
@@ -601,7 +826,7 @@ fn view_molecule() -> Result<(), Box<dyn Error>> {
       println!("InChI:    {}", m.inchi());
       println!("Metadata: {}",
                serde_json::to_string_pretty(m.metadata()).unwrap_or_else(|_| "{}".to_string()));
-      match repo.get_molecular_properties(m.inchikey()) {
+      match repo.get_molecular_properties(m.inchikey().as_str()) {
         Ok(props) => {
           println!("\nPropiedades ({}):", props.len());
           for (i, p) in props.iter().enumerate() {
@@ -644,30 +869,101 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   // Seleccionar/crear familia de sustituyentes
   let domain = engine.domain_repo();
   let families = domain.list_families()?;
-  println!("Familias disponibles (para elegir substituyentes):");
+  
+  if families.is_empty() {
+    println!("No hay familias disponibles. Debes crear una familia de substituyentes primero.");
+    println!("Usa la opción 15 del menú principal para crear una familia.");
+    return Ok(());
+  }
+  
+  println!("\n=== Familias disponibles (para elegir substituyentes) ===");
   for (i, f) in families.iter().enumerate() {
     let name = f.name().map(|s| s.to_string()).unwrap_or_else(|| "sin nombre".to_string());
-    println!("  [{}] {} ({} moléculas) id={}", i, name, f.molecules().len(), f.id());
+    println!("  [{}] {} ({} moléculas) - ID: {}", i, name, f.molecules().len(), f.id());
+    println!("      Moléculas:");
+    for (j, mol) in f.molecules().iter().enumerate().take(3) {
+      println!("        [{}] {}", j, mol.smiles());
+    }
+    if f.molecules().len() > 3 {
+      println!("        ... y {} más", f.molecules().len() - 3);
+    }
   }
   println!("  [n] Crear nueva familia de substituyentes");
-  let choice = prompt("Elige índice o 'n' para crear nueva: ")?;
+  
+  let choice = prompt("\nElige índice o 'n' para crear nueva: ")?;
   let substituent_family_id = if choice.trim().eq_ignore_ascii_case("n") {
-    let smiles_line = prompt("SMILES substituyentes (coma separados): ")?;
-    let mut mols = Vec::new();
-    for s in smiles_line.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-      match molecule_from_smiles(s) {
-        Ok(m) => mols.push(m),
-        Err(e) => println!("SMILES inválido '{}' ({}) ignorado", s, e),
+    println!("\n=== Crear nueva familia de substituyentes ===");
+    println!("Opciones:");
+    println!("  1) Ingresar SMILES manualmente");
+    println!("  2) Seleccionar desde moléculas existentes");
+    
+    let option = prompt("Elige opción (1 o 2): ")?;
+    
+    match option.trim() {
+      "1" => {
+        let smiles_line = prompt("SMILES substituyentes (separados por comas): ")?;
+        let mut mols = Vec::new();
+        for s in smiles_line.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+          match molecule_from_smiles(s) {
+            Ok(m) => {
+              println!("  ✓ Molécula creada: {}", s);
+              mols.push(m);
+            },
+            Err(e) => println!("  ✗ SMILES inválido '{}' ({}) ignorado", s, e),
+          }
+        }
+        if mols.is_empty() {
+          println!("No se crearon moléculas para la nueva familia. Abortando Step5.");
+          return Ok(());
+        }
+        let fam = MoleculeFamily::new(mols, serde_json::json!({"source":"step5_substitutes"}))?;
+        let fid = domain.save_family(fam)?;
+        println!("✅ Familia de substituyentes creada con ID: {}", fid);
+        fid
+      }
+      "2" => {
+        let all_mols = domain.list_molecules()?;
+        if all_mols.is_empty() {
+          println!("No hay moléculas disponibles. Crea moléculas primero.");
+          return Ok(());
+        }
+        
+        println!("\n=== Moléculas disponibles ({}) ===", all_mols.len());
+        for (i, m) in all_mols.iter().enumerate() {
+          println!("  [{}] {} | SMILES: {}", i, m.inchikey(), m.smiles());
+        }
+        
+        let selection = prompt("\nÍndices separados por comas (o 'all'): ")?;
+        let selected: Vec<Molecule> = if selection.trim().eq_ignore_ascii_case("all") {
+          all_mols.clone()
+        } else {
+          let mut sel = Vec::new();
+          for idx_str in selection.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            if let Ok(idx) = idx_str.parse::<usize>() {
+              if idx < all_mols.len() {
+                sel.push(all_mols[idx].clone());
+              }
+            }
+          }
+          sel
+        };
+        
+        if selected.is_empty() {
+          println!("No se seleccionaron moléculas. Abortando Step5.");
+          return Ok(());
+        }
+        
+        println!("Moléculas seleccionadas: {}", selected.len());
+        let fam = MoleculeFamily::new(selected, serde_json::json!({"source":"step5_substitutes"}))?;
+        let fid = domain.save_family(fam)?;
+        println!("✅ Familia de substituyentes creada con ID: {}", fid);
+        fid
+      }
+      _ => {
+        println!("Opción inválida.");
+        return Ok(());
       }
     }
-    if mols.is_empty() {
-      println!("No se crearon moléculas para la nueva familia. Abortando Step5.");
-      return Ok(());
-    }
-    let fam = MoleculeFamily::new(mols, serde_json::json!({"source":"interactive_step5"}))?;
-    let fid = domain.save_family(fam)?;
-    println!("Familia de substituyentes creada con id={}", fid);
-    fid
   } else {
     let idx: usize = match choice.trim().parse() {
       Ok(v) => v,
@@ -956,7 +1252,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
       }
       "12" => {
-        if let Err(e) = list_families() {
+        if let Err(e) = list_families_detailed() {
           println!("Error listando familias: {}", e);
         }
       }
@@ -983,42 +1279,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
       }
       "14" => {
-        if let Err(e) = view_molecule() {
+        if let Err(e) = view_molecule_interactive() {
           println!("Error viendo molécula: {}", e);
         }
       }
       "15" => {
-        // Crear familia desde moléculas existentes en dominio
-        let repo = match new_domain_from_env() {
-          Ok(r) => r,
-          Err(e) => {
-            println!("No se pudo inicializar domain repo: {}", e);
-            continue;
-          }
-        };
-        let keys = prompt("Ingresa inchikeys separados por coma: ")?;
-        let mut mols = Vec::new();
-        for k in keys.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-          match repo.get_molecule(k) {
-            Ok(Some(m)) => mols.push(m),
-            Ok(None) => println!("No se encontró molécula con inchikey: {}", k),
-            Err(e) => println!("Error consultando inchikey {}: {}", k, e),
-          }
-        }
-        if mols.is_empty() {
-          println!("No se encontraron moléculas válidas; abortando creación de familia.");
-          continue;
-        }
-        let fam = match MoleculeFamily::new(mols, serde_json::json!({})) {
-          Ok(f) => f,
-          Err(e) => {
-            println!("Error construyendo familia: {}", e);
-            continue;
-          }
-        };
-        match repo.save_family(fam) {
-          Ok(id) => println!("Familia creada con id: {}", id),
-          Err(e) => println!("Error guardando familia: {}", e),
+        // Crear familia desde moléculas existentes en dominio (con selección interactiva)
+        if let Err(e) = create_family_interactive() {
+          println!("Error creando familia: {}", e);
         }
       }
       "16" => {

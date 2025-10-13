@@ -3,9 +3,8 @@ name = "chem-domain"
 version = "0.1.0"
 edition = "2021"
 [features]
-default = []
-# Feature mock_rdkit ahora es solo un marcador (para compatibilidad durante refactor)
-# Ya no se propaga a chem-providers
+default = ["async"]
+async = ["tokio"]
 mock_rdkit = []
 testing = ["mock_rdkit"]
 integration_tests_disabled = []
@@ -16,8 +15,9 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 sha2 = "0.10"
 thiserror = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
-# ✅ Eliminada dependencia de chem-providers (dominio puro)
- 
+async-trait = "0.1"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"], optional = true }
 [dev-dependencies]
-mockall = "0.11"
+mockall = "0.13"
 tempfile = "3.10"
+tokio-test = "0.4"

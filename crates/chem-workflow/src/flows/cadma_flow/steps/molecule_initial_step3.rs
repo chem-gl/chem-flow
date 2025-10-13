@@ -69,7 +69,7 @@ impl MoleculeInitialStep3 {
                                                    mol_weight: provider_mol.mol_weight,
                                                    mol_formula: provider_mol.mol_formula,
                                                    structure: None /* TODO: convert structure if needed */ };
-      let molecule = Molecule::from_provider_molecule(smiles, domain_provider_mol).map_err(WorkflowError::Domain)?;
+      let molecule = Molecule::from_provider_molecule(domain_provider_mol).map_err(WorkflowError::Domain)?;
       let inchikey = ctx.domain_repo.save_molecule(molecule.clone())?;
       generated_inchikeys.push(inchikey.clone());
       domain_refs.push(inchikey);

@@ -25,14 +25,14 @@ fn full_flow_steps_1_to_6() {
   // Helper to build context each step
   let ctx = StepContext::new(flow_id, flow_repo.clone(), domain_repo.clone());
   // Step 1 - create a family from explicit molecules (manual mode)
-  let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                  "CCO",
-                                  "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                  serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
-  let mol2 = Molecule::from_parts("IJDNQMDRQITEOD-UHFFFAOYSA-N", // butane InChIKey
-                                  "CCCC",
-                                  "InChI=1S/C4H10/c1-3-4-2/h3-4H2,1-2H3",
-                                  serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
+  let mol1 = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                         "CCO",
+                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                         serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
+  let mol2 = Molecule::from_simple_parts("IJDNQMDRQITEOD-UHFFFAOYSA-N", // butane InChIKey
+                                         "CCCC",
+                                         "InChI=1S/C4H10/c1-3-4-2/h3-4H2,1-2H3",
+                                         serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let s1_input = Step1Input { families: None,
                               molecules: Some(vec![mol1.clone(), mol2.clone()]),
                               new_family_name: Some("FamE2E".into()),
@@ -61,10 +61,10 @@ fn full_flow_steps_1_to_6() {
   assert!(s4_res.payload.is_object());
   ctx.save_typed_result(s4.name(), s4_res.clone(), -1, None).expect("persist step4");
   // Create substitute family (can reuse earlier molecules for simplicity)
-  let sub_mol = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                     "CCO",
-                                     "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                     serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
+  let sub_mol = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                            "CCO",
+                                            "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                            serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let sub_family = MoleculeFamily::new(vec![sub_mol.clone()], serde_json::json!({"src":"e2e"})).unwrap();
   let sub_family_id = domain_repo.save_family(sub_family).unwrap();
   // Step5: generate substitutions

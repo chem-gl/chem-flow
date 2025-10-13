@@ -194,7 +194,7 @@ impl SubstituteGenerationStep5 {
                     break;
                   }
                   // Factibilidad previa: cargar RDKit dinámico de la cadena actual y sustituyente
-                  let sub_rd = ChemEngineInterface::get_molecule(&engine, sub_mol.smiles())
+                  let sub_rd = ChemEngineInterface::get_molecule(&engine, sub_mol.smiles().as_str())
                                      .map_err(|e| WorkflowError::Other(format!("RDKit error sub: {}", e)))?;
                   let principal_rd =
                     ChemEngineInterface::get_molecule(&engine, &current_smiles).map_err(|e| {
@@ -243,7 +243,7 @@ impl SubstituteGenerationStep5 {
                                                                      mol_formula: provider_mol.mol_formula,
                                                                      structure: None /* TODO: convert structure if
                                                                                       * needed */ };
-                        match Molecule::from_provider_molecule(&current_smiles, domain_provider_mol) {
+                        match Molecule::from_provider_molecule(domain_provider_mol) {
                           Ok(new_m) => {
                             let ik_saved = ctx.domain_repo.save_molecule(new_m)?;
                             seen_inchikeys.insert(final_ik.clone());

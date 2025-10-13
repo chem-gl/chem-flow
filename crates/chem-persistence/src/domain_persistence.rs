@@ -4,6 +4,7 @@ use crate::schema;
 use crate::schema::families::dsl as families_dsl;
 use crate::schema::family_members::dsl as fm_dsl;
 use crate::schema::molecules::dsl as molecules_dsl;
+use chem_domain::domain::value_objects::{InChI, InChIKey, MolecularFormula, Smiles};
 use chem_domain::ports::{FamilyRepository, MoleculeReader, MoleculeWriter, PropertyRepository};
 use chem_domain::{DomainError, Molecule, MoleculeFamily};
 use chem_domain::{OwnedFamilyProperty, OwnedMolecularProperty};
@@ -144,6 +145,11 @@ struct MoleculeRow {
   pub inchi: String,
   pub metadata: String,
   pub structure: Option<String>,
+  pub id: Option<String>,
+  pub created_at_ts: Option<i64>,
+  pub updated_at_ts: Option<i64>,
+  pub version: Option<i32>,
+  pub molecular_formula: Option<String>,
 }
 #[derive(Debug, Queryable, Insertable, AsChangeset)]
 #[diesel(table_name = schema::families)]
@@ -193,6 +199,37 @@ struct FamilyMemberRow {
 fn map_db_err<T>(res: std::result::Result<T, DieselError>) -> Result<T, DomainError> {
   res.map_err(|e| DomainError::persistence("database", format!("db: {}", e)))
 }
+
+// Helper function to create Molecule from row, handling new fields
+fn molecule_from_row(r: &MoleculeRow) -> Result<Molecule, DomainError> {
+  let inchikey = InChIKey::try_from(r.inchikey.as_str())?;
+  let smiles = Smiles::try_from(r.smiles.as_str())?;
+  let inchi = InChI::try_from(r.inchi.as_str())?;
+  let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
+  if let Some(s) = r.structure.as_ref() {
+    if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
+      metadata_val["structure"] = struct_json;
+    }
+  }
+  let molecular_formula = r.molecular_formula.as_ref().and_then(|f| MolecularFormula::new(f).ok());
+  let id = r.id.as_ref().and_then(|id| Uuid::parse_str(id).ok()).unwrap_or_else(Uuid::new_v4);
+  let created_at = r.created_at_ts
+                    .map(|ts| chrono::DateTime::from_timestamp(ts, 0).unwrap_or_else(chrono::Utc::now))
+                    .unwrap_or_else(chrono::Utc::now);
+  let updated_at = r.updated_at_ts
+                    .map(|ts| chrono::DateTime::from_timestamp(ts, 0).unwrap_or_else(chrono::Utc::now))
+                    .unwrap_or_else(chrono::Utc::now);
+  let version = r.version.unwrap_or(1) as u64;
+  Molecule::from_parts(id,
+                       inchikey,
+                       smiles,
+                       inchi,
+                       molecular_formula,
+                       metadata_val,
+                       created_at,
+                       updated_at,
+                       version)
+}
 // Implementation of MoleculeReader port
 impl MoleculeReader for DieselDomainRepository {
   fn get_molecule(&self, inchikey: &str) -> Result<Option<Molecule>, DomainError> {
@@ -202,13 +239,7 @@ impl MoleculeReader for DieselDomainRepository {
                                       .optional()
                                       .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
     if let Some(r) = opt {
-      let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
-      if let Some(s) = r.structure.as_ref() {
-        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
-          metadata_val["structure"] = struct_json;
-        }
-      }
-      let mol = Molecule::from_parts(&r.inchikey, &r.smiles, &r.inchi, metadata_val)?;
+      let mol = molecule_from_row(&r)?;
       Ok(Some(mol))
     } else {
       Ok(None)
@@ -220,13 +251,7 @@ impl MoleculeReader for DieselDomainRepository {
                                        .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-      let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
-      if let Some(s) = r.structure.as_ref() {
-        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
-          metadata_val["structure"] = struct_json;
-        }
-      }
-      let mol = Molecule::from_parts(&r.inchikey, &r.smiles, &r.inchi, metadata_val)?;
+      let mol = molecule_from_row(&r)?;
       out.push(mol);
     }
     Ok(out)
@@ -238,13 +263,7 @@ impl MoleculeReader for DieselDomainRepository {
                                        .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
     let mut out = Vec::with_capacity(rows.len());
     for r in rows {
-      let mut metadata_val = serde_json::from_str(&r.metadata).unwrap_or(serde_json::json!({}));
-      if let Some(s) = r.structure.as_ref() {
-        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
-          metadata_val["structure"] = struct_json;
-        }
-      }
-      let mol = Molecule::from_parts(&r.inchikey, &r.smiles, &r.inchi, metadata_val)?;
+      let mol = molecule_from_row(&r)?;
       out.push(mol);
     }
     Ok(out)
@@ -258,7 +277,12 @@ impl MoleculeWriter for DieselDomainRepository {
                            smiles: molecule.smiles().to_string(),
                            inchi: molecule.inchi().to_string(),
                            metadata: molecule.metadata().to_string(),
-                           structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
+                           structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()),
+                           id: Some(molecule.id().to_string()),
+                           created_at_ts: Some(molecule.created_at().timestamp()),
+                           updated_at_ts: Some(molecule.updated_at().timestamp()),
+                           version: Some(molecule.version() as i32),
+                           molecular_formula: molecule.molecular_formula().map(|f| f.to_string()) };
     #[cfg(feature = "postgres")]
     {
       map_db_err(diesel::insert_into(schema::molecules::table).values(&mr)
@@ -269,13 +293,18 @@ impl MoleculeWriter for DieselDomainRepository {
     #[cfg(not(feature = "postgres"))]
     {
       let res =
-        diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, \
-                           ?, ?, ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey.clone())
-                                     .bind::<diesel::sql_types::Text, _>(mr.smiles)
-                                     .bind::<diesel::sql_types::Text, _>(mr.inchi)
-                                     .bind::<diesel::sql_types::Text, _>(mr.metadata)
-                                     .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure.clone())
-                                     .execute(&mut conn);
+        diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure, id, created_at_ts, updated_at_ts, version, molecular_formula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+          .bind::<diesel::sql_types::Text, _>(mr.inchikey.clone())
+          .bind::<diesel::sql_types::Text, _>(mr.smiles)
+          .bind::<diesel::sql_types::Text, _>(mr.inchi)
+          .bind::<diesel::sql_types::Text, _>(mr.metadata)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.id)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.created_at_ts)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.updated_at_ts)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(mr.version)
+          .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.molecular_formula)
+          .execute(&mut conn);
       map_db_err(res)?;
     }
     Ok(molecule.inchikey().to_string())
@@ -325,7 +354,12 @@ impl FamilyRepository for DieselDomainRepository {
                                    smiles: m.smiles().to_string(),
                                    inchi: m.inchi().to_string(),
                                    metadata: m.metadata().to_string(),
-                                   structure: m.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
+                                   structure: m.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()),
+                                   id: Some(m.id().to_string()),
+                                   created_at_ts: Some(m.created_at().timestamp()),
+                                   updated_at_ts: Some(m.updated_at().timestamp()),
+                                   version: Some(m.version() as i32),
+                                   molecular_formula: m.molecular_formula().map(|f| f.to_string()) };
             #[cfg(feature = "postgres")]
             {
               let _ = diesel::insert_into(schema::molecules::table).values(&mr)
@@ -335,15 +369,20 @@ impl FamilyRepository for DieselDomainRepository {
             }
             #[cfg(not(feature = "postgres"))]
             {
-              let _ = diesel::sql_query(
-            "INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, ?, ?, ?)",
-          )
-          .bind::<diesel::sql_types::Text, _>(mr.inchikey)
-          .bind::<diesel::sql_types::Text, _>(mr.smiles)
-          .bind::<diesel::sql_types::Text, _>(mr.inchi)
-          .bind::<diesel::sql_types::Text, _>(mr.metadata)
-          .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
-          .execute(conn);
+              let _ =
+            diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure, id, \
+                               created_at_ts, updated_at_ts, version, molecular_formula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, \
+                               ?, ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey)
+                                      .bind::<diesel::sql_types::Text, _>(mr.smiles)
+                                      .bind::<diesel::sql_types::Text, _>(mr.inchi)
+                                      .bind::<diesel::sql_types::Text, _>(mr.metadata)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.id)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.created_at_ts)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.updated_at_ts)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(mr.version)
+                                      .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.molecular_formula)
+                                      .execute(conn);
             }
           }
           // Insert family members
@@ -378,13 +417,7 @@ impl FamilyRepository for DieselDomainRepository {
                                 .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
       let mut mols = Vec::with_capacity(molecule_rows.len());
       for mr in molecule_rows {
-        let mut metadata_val = serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({}));
-        if let Some(s) = mr.structure.as_ref() {
-          if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
-            metadata_val["structure"] = struct_json;
-          }
-        }
-        let mol = Molecule::from_parts(&mr.inchikey, &mr.smiles, &mr.inchi, metadata_val)?;
+        let mol = molecule_from_row(&mr)?;
         mols.push(mol);
       }
       let provenance = serde_json::from_str(&r.provenance).unwrap_or(serde_json::json!({}));
@@ -432,13 +465,7 @@ impl FamilyRepository for DieselDomainRepository {
     // Map molecules by inchikey
     let mut molecules_by_inchikey: std::collections::HashMap<String, Molecule> = std::collections::HashMap::new();
     for mr in molecule_rows {
-      let mut metadata_val = serde_json::from_str(&mr.metadata).unwrap_or(serde_json::json!({}));
-      if let Some(s) = mr.structure.as_ref() {
-        if let Ok(struct_json) = serde_json::from_str::<serde_json::Value>(s) {
-          metadata_val["structure"] = struct_json;
-        }
-      }
-      let mol = Molecule::from_parts(&mr.inchikey, &mr.smiles, &mr.inchi, metadata_val)?;
+      let mol = molecule_from_row(&mr)?;
       molecules_by_inchikey.insert(mr.inchikey, mol);
     }
     // Assemble families
@@ -489,7 +516,12 @@ impl FamilyRepository for DieselDomainRepository {
                           smiles: molecule.smiles().to_string(),
                           inchi: molecule.inchi().to_string(),
                           metadata: molecule.metadata().to_string(),
-                          structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()) };
+                          structure: molecule.metadata().get("structure").and_then(|v| serde_json::to_string(v).ok()),
+                          id: Some(molecule.id().to_string()),
+                          created_at_ts: Some(molecule.created_at().timestamp()),
+                          updated_at_ts: Some(molecule.updated_at().timestamp()),
+                          version: Some(molecule.version() as i32),
+                          molecular_formula: molecule.molecular_formula().map(|f| f.to_string()) };
           #[cfg(feature = "postgres")]
           {
             let _ = diesel::insert_into(schema::molecules::table).values(&mr)
@@ -499,15 +531,20 @@ impl FamilyRepository for DieselDomainRepository {
           }
           #[cfg(not(feature = "postgres"))]
           {
-            let _ = diesel::sql_query(
-          "INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind::<diesel::sql_types::Text, _>(mr.inchikey)
-        .bind::<diesel::sql_types::Text, _>(mr.smiles)
-        .bind::<diesel::sql_types::Text, _>(mr.inchi)
-        .bind::<diesel::sql_types::Text, _>(mr.metadata)
-        .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
-        .execute(conn);
+            let _ =
+          diesel::sql_query("INSERT OR IGNORE INTO molecules (inchikey, smiles, inchi, metadata, structure, id, \
+                             created_at_ts, updated_at_ts, version, molecular_formula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                             ?)").bind::<diesel::sql_types::Text, _>(mr.inchikey)
+                                 .bind::<diesel::sql_types::Text, _>(mr.smiles)
+                                 .bind::<diesel::sql_types::Text, _>(mr.inchi)
+                                 .bind::<diesel::sql_types::Text, _>(mr.metadata)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.structure)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.id)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.created_at_ts)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>, _>(mr.updated_at_ts)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Integer>, _>(mr.version)
+                                 .bind::<diesel::sql_types::Nullable<diesel::sql_types::Text>, _>(mr.molecular_formula)
+                                 .execute(conn);
           }
           // Persist new family
           let new_id_s = new_fam.id().to_string();
@@ -533,7 +570,8 @@ impl FamilyRepository for DieselDomainRepository {
     conn.transaction(|conn| {
           let fam_opt = self.get_family(family_id).map_err(|_| diesel::result::Error::RollbackTransaction)?;
           let fam = fam_opt.ok_or_else(|| diesel::result::Error::RollbackTransaction)?;
-          let new_fam = fam.remove_molecule(inchikey).map_err(|_| diesel::result::Error::RollbackTransaction)?;
+          let inchikey_obj = chem_domain::domain::value_objects::inchikey::InChIKey::try_from(inchikey).map_err(|_| diesel::result::Error::RollbackTransaction)?;
+          let new_fam = fam.remove_molecule(&inchikey_obj).map_err(|_| diesel::result::Error::RollbackTransaction)?;
           // Persist new family
           let new_id_s = new_fam.id().to_string();
           let family_row = FamilyRow { id: new_id_s.clone(),

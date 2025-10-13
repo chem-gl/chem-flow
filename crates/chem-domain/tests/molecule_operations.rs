@@ -14,16 +14,16 @@ mod tests {
     let repo = InMemoryDomainRepository::new();
     // Create two molecules using from_parts with hardcoded data (Phase 2: pure
     // domain)
-    let molecule1 = Molecule::from_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", // ethane InChIKey
-                                         "CC",
-                                         "InChI=1S/C2H6/c1-2/h1-2H3",
-                                         serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create \
-                                                                                                         ethane");
-    let molecule2 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                         "CCO",
-                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                         serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create \
-                                                                                                         ethanol");
+    let molecule1 =
+      Molecule::from_simple_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", // ethane InChIKey
+                                  "CC",
+                                  "InChI=1S/C2H6/c1-2/h1-2H3",
+                                  serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create ethane");
+    let molecule2 =
+      Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                  "CCO",
+                                  "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                  serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create ethanol");
     // Save the molecules
     let id1 = repo.save_molecule(molecule1.clone())?;
     let id2 = repo.save_molecule(molecule2.clone())?;
@@ -55,10 +55,10 @@ mod tests {
     assert_eq!(mol2.smiles(), molecule2.smiles());
     // Create another family that doesn't use these molecules
     let another_molecule =
-      Molecule::from_parts("UHOVQNZJYSORNB-UHFFFAOYSA-N", // benzene InChIKey
-                           "c1ccccc1",
-                           "InChI=1S/C6H6/c1-2-4-6-5-3-1/h1-6H",
-                           serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create benzene");
+      Molecule::from_simple_parts("UHOVQNZJYSORNB-UHFFFAOYSA-N", // benzene InChIKey
+                                  "c1ccccc1",
+                                  "InChI=1S/C6H6/c1-2-4-6-5-3-1/h1-6H",
+                                  serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create benzene");
     let another_id = repo.save_molecule(another_molecule.clone())?;
     let another_family = MoleculeFamily::new(vec![another_molecule], json!({"name": "Another Family"}))?;
     let another_family_id = repo.save_family(another_family)?;
@@ -91,10 +91,7 @@ mod tests {
     let mut total_weight = 0.0;
     let mut total_logp = 0.0;
     for (inchikey, smiles, inchi, props) in &molecule_data {
-      let molecule = Molecule::from_parts(inchikey, smiles, inchi, props.clone()).expect("Should create molecule");
-      // In a real implementation, we would add properties directly to the molecule
-      // For this test, we'll assume they're already there
-      // Save the molecule first
+      let molecule = Molecule::from_simple_parts(inchikey, smiles, inchi, props.clone()).expect("Should create molecule");
       repo.save_molecule(molecule.clone())?;
       molecules.push(molecule);
       total_weight += props["weight"].as_f64().unwrap();
@@ -103,14 +100,14 @@ mod tests {
     // Create a family from these molecules
     let family = MoleculeFamily::new(molecules.clone(),
                                      json!({
-                                                         "name": "Test Properties Family",
-                                                         "description": "Family for testing property aggregation",
-                                     "properties": {
-                                       "avg_weight": total_weight / count as f64,
-                                       "avg_logP": total_logp / count as f64,
-                                       "total_weight": total_weight
+                                      "name": "Test Properties Family",
+                                      "description": "Family for testing property aggregation",
+                                      "properties": {
+                                      "avg_weight": total_weight / count as f64,
+                                      "avg_logP": total_logp / count as f64,
+                                      "total_weight": total_weight
                                      }
-                                                     }))?;
+                                                       }))?;
     let family_id = repo.save_family(family)?;
     // Retrieve the family and verify aggregate properties
     let retrieved_family = repo.get_family(&family_id)?.expect("Family should exist");
@@ -142,16 +139,16 @@ mod tests {
   fn test_family_molecule_deduplication() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
     // Create molecules using from_parts (Phase 2: pure domain)
-    let molecule1 = Molecule::from_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", // ethane InChIKey
-                                         "CC",
-                                         "InChI=1S/C2H6/c1-2/h1-2H3",
-                                         serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create \
-                                                                                                         ethane");
-    let molecule2 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                         "CCO",
-                                         "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                         serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create \
-                                                                                                         ethanol");
+    let molecule1 =
+      Molecule::from_simple_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", // ethane InChIKey
+                                  "CC",
+                                  "InChI=1S/C2H6/c1-2/h1-2H3",
+                                  serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create ethane");
+    let molecule2 =
+      Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                  "CCO",
+                                  "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                  serde_json::json!({"phase": 2, "source": "hardcoded"})).expect("Should create ethanol");
     // Save them twice to test deduplication
     let id1a = repo.save_molecule(molecule1.clone())?;
     let id1b = repo.save_molecule(molecule1.clone())?;

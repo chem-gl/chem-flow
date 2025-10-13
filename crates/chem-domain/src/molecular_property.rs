@@ -1,12 +1,10 @@
 //! Entidad MolecularProperty - Propiedad asociada a una molécula con hash para
 //! integridad
-
 use crate::{DomainError, Molecule};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use uuid::Uuid;
-
 /// Entidad MolecularProperty
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MolecularProperty<V, M> {
@@ -19,7 +17,6 @@ pub struct MolecularProperty<V, M> {
   value_hash: String,
   metadata: M,
 }
-
 impl<V, M> MolecularProperty<V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
@@ -36,9 +33,7 @@ impl<V, M> MolecularProperty<V, M>
     if normalized_type.is_empty() {
       return Err(DomainError::validation("MolecularProperty", "El tipo de propiedad no puede estar vacío"));
     }
-
-    let value_hash = Self::calculate_value_hash(molecule.inchikey(), &normalized_type, &value, &metadata)?;
-
+    let value_hash = Self::calculate_value_hash(molecule.inchikey().as_str(), &normalized_type, &value, &metadata)?;
     Ok(Self { id: Uuid::new_v4(),
               molecule,
               property_type: normalized_type,
@@ -48,7 +43,6 @@ impl<V, M> MolecularProperty<V, M>
               value_hash,
               metadata })
   }
-
   /// Calcula el hash de la propiedad
   fn calculate_value_hash(inchikey: &str, property_type: &str, value: &V, metadata: &M) -> Result<String, DomainError> {
     let mut hasher = Sha256::new();
@@ -60,50 +54,40 @@ impl<V, M> MolecularProperty<V, M>
     hasher.update(metadata_json.as_bytes());
     Ok(format!("{:x}", hasher.finalize()))
   }
-
   /// Verifica la integridad del hash de la propiedad
   pub fn verify_integrity(&self) -> Result<bool, DomainError> {
-    let calculated_hash =
-      Self::calculate_value_hash(self.molecule.inchikey(), &self.property_type, &self.value, &self.metadata)?;
+    let calculated_hash = Self::calculate_value_hash(self.molecule.inchikey().as_str(),
+                                                     &self.property_type,
+                                                     &self.value,
+                                                     &self.metadata)?;
     Ok(calculated_hash == self.value_hash)
   }
-
   // === Getters ===
-
   pub fn id(&self) -> Uuid {
     self.id
   }
-
   pub fn molecule(&self) -> &Molecule {
     &self.molecule
   }
-
   pub fn property_type(&self) -> &str {
     &self.property_type
   }
-
   pub fn value(&self) -> &V {
     &self.value
   }
-
   pub fn quality(&self) -> Option<&str> {
     self.quality.as_deref()
   }
-
   pub fn preferred(&self) -> bool {
     self.preferred
   }
-
   pub fn value_hash(&self) -> &str {
     &self.value_hash
   }
-
   pub fn metadata(&self) -> &M {
     &self.metadata
   }
-
   // === Métodos de modificación (crean nuevas instancias) ===
-
   /// Crea una nueva propiedad con calidad actualizada
   pub fn with_quality(&self, quality: Option<String>) -> Result<Self, DomainError> {
     Self::new(self.molecule.clone(),
@@ -113,7 +97,6 @@ impl<V, M> MolecularProperty<V, M>
               self.preferred,
               self.metadata.clone())
   }
-
   /// Crea una nueva propiedad con metadata actualizado
   pub fn with_metadata(&self, metadata: M) -> Result<Self, DomainError> {
     Self::new(self.molecule.clone(),
@@ -123,7 +106,6 @@ impl<V, M> MolecularProperty<V, M>
               self.preferred,
               metadata)
   }
-
   /// Crea una nueva propiedad con preferencia actualizada
   pub fn with_preferred(&self, preferred: bool) -> Result<Self, DomainError> {
     Self::new(self.molecule.clone(),
@@ -133,15 +115,12 @@ impl<V, M> MolecularProperty<V, M>
               preferred,
               self.metadata.clone())
   }
-
   // === Métodos de dominio ===
-
   /// Verifica si dos propiedades son equivalentes (mismo hash)
   pub fn is_equivalent(&self, other: &Self) -> bool {
     self.value_hash == other.value_hash
   }
 }
-
 impl<V, M> fmt::Display for MolecularProperty<V, M>
   where V: fmt::Debug,
         M: fmt::Debug
@@ -152,7 +131,6 @@ impl<V, M> fmt::Display for MolecularProperty<V, M>
            self.id, self.property_type, self.preferred)
   }
 }
-
 impl<V, M> PartialEq for MolecularProperty<V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
@@ -161,19 +139,17 @@ impl<V, M> PartialEq for MolecularProperty<V, M>
     self.is_equivalent(other)
   }
 }
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::Molecule;
   use serde_json::json;
-
   #[test]
   fn test_molecular_property_creation() -> Result<(), DomainError> {
-    let molecule = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({}))?;
+    let molecule = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({}))?;
     let prop = MolecularProperty::new(molecule,
                                       "molecular_weight",
                                       46.07,
@@ -183,13 +159,12 @@ mod tests {
     assert!(prop.verify_integrity()?);
     Ok(())
   }
-
   #[test]
   fn test_invalid_property_type() {
-    let molecule = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                        "CCO",
-                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                        json!({})).unwrap();
+    let molecule = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                               "CCO",
+                                               "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                               json!({})).unwrap();
     let result = MolecularProperty::new(molecule, "   ", 46.07, None, false, json!({}));
     assert!(result.is_err());
   }

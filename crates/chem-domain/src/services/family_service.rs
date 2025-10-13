@@ -1,5 +1,6 @@
+use crate::domain::entities::{Molecule, MoleculeFamily};
 use crate::ports::{FamilyRepository, MoleculeReader};
-use crate::{DomainError, Molecule, MoleculeFamily};
+use crate::DomainError;
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -204,14 +205,14 @@ mod tests {
   fn test_create_family_from_molecules() {
     let repo = InMemoryDomainRepository::new();
     let service = FamilyService::new(repo);
-    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                    "CCO",
-                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                    json!({"weight": 46.07})).unwrap();
-    let mol2 = Molecule::from_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N",
-                                    "CC",
-                                    "InChI=1S/C2H6/c1-2/h1-2H3",
-                                    json!({"weight": 30.07})).unwrap();
+    let mol1 = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({"weight": 46.07})).unwrap();
+    let mol2 = Molecule::from_simple_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N",
+                                           "CC",
+                                           "InChI=1S/C2H6/c1-2/h1-2H3",
+                                           json!({"weight": 30.07})).unwrap();
     let family_id = service.create_family_from_molecules(vec![mol1, mol2], json!({"name": "test_family"})).unwrap();
     let family = service.get_family(&family_id).unwrap().unwrap();
     assert_eq!(family.molecules().len(), 2);
@@ -220,14 +221,14 @@ mod tests {
   fn test_calculate_family_statistics() {
     let repo = InMemoryDomainRepository::new();
     let service = FamilyService::new(repo);
-    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                    "CCO",
-                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                    json!({"weight": 46.07, "logP": -0.31})).unwrap();
-    let mol2 = Molecule::from_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N",
-                                    "CC",
-                                    "InChI=1S/C2H6/c1-2/h1-2H3",
-                                    json!({"weight": 30.07, "logP": 1.81})).unwrap();
+    let mol1 = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({"weight": 46.07, "logP": -0.31})).unwrap();
+    let mol2 = Molecule::from_simple_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N",
+                                           "CC",
+                                           "InChI=1S/C2H6/c1-2/h1-2H3",
+                                           json!({"weight": 30.07, "logP": 1.81})).unwrap();
     let family_id = service.create_family_from_molecules(vec![mol1, mol2], json!({})).unwrap();
     let stats = service.calculate_family_statistics(&family_id).unwrap();
     assert_eq!(stats.molecule_count, 2);
@@ -239,11 +240,12 @@ mod tests {
   fn test_calculate_diversity_metrics() {
     let repo = InMemoryDomainRepository::new();
     let service = FamilyService::new(repo);
-    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                    "CCO",
-                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                    json!({})).unwrap();
-    let mol2 = Molecule::from_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", "CC", "InChI=1S/C2H6/c1-2/h1-2H3", json!({})).unwrap();
+    let mol1 = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                           "CCO",
+                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                           json!({})).unwrap();
+    let mol2 =
+      Molecule::from_simple_parts("OTMSDBZUPAUEDD-UHFFFAOYSA-N", "CC", "InChI=1S/C2H6/c1-2/h1-2H3", json!({})).unwrap();
     let family_id = service.create_family_from_molecules(vec![mol1, mol2], json!({})).unwrap();
     let diversity = service.calculate_family_diversity(&family_id).unwrap();
     assert_eq!(diversity.total_molecules, 2);

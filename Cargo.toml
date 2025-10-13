@@ -22,12 +22,11 @@ chem-domain = { path = "crates/chem-domain" }
 flow = { path = "crates/flow" }
 chem-persistence = { path = "crates/chem-persistence" }
 chem-providers = { path = "crates/chem-providers" }
-chem-workflow = { path = "crates/chem-workflow" }
-chem-utils = { path = "crates/chem-utils" }
+chem-workflow = { path = "crates/chem-workflow" } 
 postgres = "0.19"
 [dev-dependencies]
 tokio-test = "0.4"
-cargo-tarpaulin = "0.32"
+cargo-tarpaulin = "0.33"
 grcov = "0.10"
 [[bin]]
 name = "main-core"
@@ -39,7 +38,6 @@ members = [
   "crates/chem-persistence",
   "crates/chem-providers",
   "crates/chem-workflow",
-  "crates/chem-utils"
 ]
 [patch.crates-io]
 pyo3 = { git = "https://github.com/PyO3/pyo3", tag = "v0.26.0" }
@@ -57,8 +55,8 @@ pg_demo = ["chem-persistence/pg"]
 sqlite = ["chem-persistence/sqlite"]
 postgres = ["chem-persistence/postgres"]
 # Feature para ejecutar tests con mocks (sin RDKit real)
-mock_rdkit = ["chem-domain/mock_rdkit", "chem-providers/mock_rdkit", "chem-persistence/mock_rdkit", "chem-workflow/mock_rdkit", "chem-utils/mock_rdkit"]
+mock_rdkit = ["chem-domain/mock_rdkit", "chem-providers/mock_rdkit", "chem-persistence/mock_rdkit", "chem-workflow/mock_rdkit"]
 # Feature para utilidades de testing (activa SQLite en chem-persistence)
-testing = ["chem-persistence/testing", "chem-utils/testing"]
+testing = ["chem-persistence/testing"]
 # Feature para ejemplos de integración (Phase 4)
 integration_examples = []

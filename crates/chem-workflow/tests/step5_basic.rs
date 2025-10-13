@@ -12,18 +12,19 @@ fn step5_smoke() {
   let flow_id = flow_repo.create_flow(Some("test".into()), Some("active".into()), serde_json::json!({})).unwrap();
   let ctx = StepContext::new(flow_id, flow_repo.clone(), domain_repo.clone());
   // Create a substitute family with one simple molecule (ethanol) persisted
-  let sub_mol = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                     "CCO",
-                                     "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                     serde_json::json!({"phase": 2, "source": "test_hardcoded"})).expect("valid molecule");
+  let sub_mol =
+    Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
+                                "CCO",
+                                "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                serde_json::json!({"phase": 2, "source": "test_hardcoded"})).expect("valid molecule");
   let family = MoleculeFamily::new(vec![sub_mol.clone()], serde_json::json!({"origin":"test"})).unwrap();
   let family_id = domain_repo.save_family(family).unwrap();
   // Simulate Step4 payload: generated_for includes one principal molecule
   // (methane) persisted
-  let principal = Molecule::from_parts("VNWKTOKETHGBQD-UHFFFAOYSA-N", // methane InChIKey
-                                       "C",
-                                       "InChI=1S/CH4/h1H4",
-                                       serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
+  let principal = Molecule::from_simple_parts("VNWKTOKETHGBQD-UHFFFAOYSA-N", // methane InChIKey
+                                              "C",
+                                              "InChI=1S/CH4/h1H4",
+                                              serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let principal_ik = domain_repo.save_molecule(principal).unwrap();
   let step4_payload = Step4Payload { generated_for: vec![principal_ik.clone()],
                                      saved_property_ids: vec![],

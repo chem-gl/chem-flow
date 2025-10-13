@@ -8,25 +8,25 @@ fn molecule_and_family_persist_structure() -> Result<(), Box<dyn std::error::Err
   // Create a temporary sqlite-backed repo for testing.
   let (repo, _db_guard) = chem_persistence::new_sqlite_for_test()?;
   // Create a molecule using from_parts (Phase 2: pure domain approach)
-  let mol = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
-                                 "CCO",
-                                 "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                 serde_json::json!({
-                                   "phase": 2,
-                                   "source": "hardcoded",
-                                   "structure": {
-                                     "atoms": [
-                                       {"element": "C", "x": 0.0, "y": 0.0, "z": 0.0},
-                                       {"element": "C", "x": 1.5, "y": 0.0, "z": 0.0},
-                                       {"element": "O", "x": 2.25, "y": 1.3, "z": 0.0}
-                                     ],
-                                     "bonds": [
-                                       {"from": 0, "to": 1, "order": 1},
-                                       {"from": 1, "to": 2, "order": 1}
-                                     ],
-                                     "substitution_points": [0, 2]
-                                   }
-                                 }))?; // ethanol
+  let mol = Molecule::from_simple_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                        "CCO",
+                                        "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                        serde_json::json!({
+                                          "phase": 2,
+                                          "source": "hardcoded",
+                                          "structure": {
+                                            "atoms": [
+                                              {"element": "C", "x": 0.0, "y": 0.0, "z": 0.0},
+                                              {"element": "C", "x": 1.5, "y": 0.0, "z": 0.0},
+                                              {"element": "O", "x": 2.25, "y": 1.3, "z": 0.0}
+                                            ],
+                                            "bonds": [
+                                              {"from": 0, "to": 1, "order": 1},
+                                              {"from": 1, "to": 2, "order": 1}
+                                            ],
+                                            "substitution_points": [0, 2]
+                                          }
+                                        }))?; // ethanol
   let inchikey = repo.save_molecule(mol.clone())?;
   // Retrieve the molecule and verify structure in metadata
   let loaded = repo.get_molecule(&inchikey)?.expect("molecule not found");
