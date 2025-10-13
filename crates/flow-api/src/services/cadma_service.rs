@@ -184,6 +184,7 @@ impl CadmaService {
   }
 
   /// Auxiliar: crea molécula desde SMILES
+  #[allow(dead_code)]
   pub fn molecule_from_smiles(smiles: &str) -> Result<Molecule, ApiError> {
     let engine = ChemEngine::init().map_err(|e| ApiError::InternalError(format!("Error inicializando ChemEngine: {}", e)))?;
 
@@ -202,6 +203,7 @@ impl CadmaService {
   }
 
   /// Convierte string de método a enum ADMETSAMethod
+  #[allow(dead_code)]
   pub fn parse_admetsa_method(method_str: &str) -> Result<ADMETSAMethod, ApiError> {
     match method_str {
       "Manual" => Ok(ADMETSAMethod::Manual),

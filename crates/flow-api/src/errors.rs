@@ -8,6 +8,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 /// Error principal de la API
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
   #[error("Entidad no encontrada: {0}")]

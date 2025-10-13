@@ -1,20 +1,149 @@
-# Flow-API: API RESTful para Workflows Químicos CADMA
+ # Flow-API: API RESTful para Workflows Químicos CADMA
 
-API RESTful completa para ejecutar y gestionar workflows químicos CADMA con persistencia en PostgreSQL/SQLite.
+ Este crate implementa una API RESTful que permite ejecutar, seguir y gestionar
+ ejecuciones del workflow CADMA (Chemical ADMETSA workflow) expuestas desde la
+ librería `chem-workflow` y persistidas mediante `chem-persistence`.
 
-## 🚀 Características
+ Estado actual (resumen)
+ - Implementado: endpoints HTTP para iniciar ejecuciones, listar ejecuciones,
+   obtener estado, ejecutar pasos individuales, cancelar ejecuciones y health check.
+ - OpenAPI + Swagger UI expuesto en `/docs` y el JSON en `/api-doc/openapi.json`.
+ - Persistencia: PostgreSQL en producción y SQLite por defecto para desarrollo y tests.
+ - Arquitectura: Hexagonal (domain, application, ports/adapters, infra).
+ - Tests: suite de integration tests que usan SQLite temporal.
 
-- **Arquitectura Hexagonal**: Separación clara entre dominio, aplicación e infraestructura
-- **Persistencia Real**: Soporte para PostgreSQL (producción) y SQLite (desarrollo/tests)
-- **Documentación Automática**: OpenAPI 3.0 + Swagger UI integrado
-- **Validación de Datos**: Validación exhaustiva de requests con tipos seguros
-- **Logging Estructurado**: Sistema de trazabilidad completo con `tracing`
-- **Tests de Integración**: Suite completa de tests end-to-end
+ Características destacadas
+ - Arquitectura limpia y orientada a pruebas (ports & adapters).
+ - Documentación automática con `utoipa` y `utoipa-swagger-ui`.
+ - Scripts y `docker-compose` para levantar una pila mínima (Postgres + API).
 
-## 📋 Requisitos
+ Requisitos mínimos
+ - Rust (se recomienda toolchain nightly del repositorio: `rustup override set nightly`).
+ - Docker + docker-compose (opcional, para levantar DB + API en contenedores).
 
-- Rust 1.75+ (nightly toolchain configurado en el workspace)
-- PostgreSQL 15+ (para producción)
+ -----------------------------------------------------------------------------
+ ## Cómo funciona (visión rápida)
+
+ - El endpoint principal orquesta ejecuciones CADMA usando `chem-workflow`.
+ - `chem-workflow` construye un `CadmaFlow` que usa `flow` para persistir el árbol
+   de flujos y `chem-persistence` para persistir información de dominio (moléculas,
+   familias, propiedades).
+ - La API expone una capa delgada (handlers) que mapea JSON <-> DTOs y delega
+   en `CadmaService` para la lógica de negocio.
+
+ -----------------------------------------------------------------------------
+ ## Endpoints importantes
+
+ - GET /health
+   - Health check simple (200 OK cuando la API está lista).
+
+ - POST /api/flows/cadma/start
+   - Inicia una ejecución CADMA.
+   - Body: { name?: string, metadata?: object }
+   - Respuesta: { execution_id, status, current_step, created_at }
+
+ - GET /api/flows/cadma
+   - Lista ejecuciones existentes con metadata resumida.
+
+ - GET /api/flows/cadma/{id}
+   - Obtiene estado y pasos completados de una ejecución.
+
+ - POST /api/flows/cadma/{id}/step
+   - Ejecuta un paso (index) con un payload arbitrario JSON.
+
+ - DELETE /api/flows/cadma/{id}
+   - Cancela (marca) una ejecución. Actualmente actúa como confirmación de cancel
+     (lógica de limpieza pendiente de implementación completa).
+
+ - OpenAPI / Swagger
+   - Swagger UI: /docs
+   - OpenAPI JSON: /api-doc/openapi.json
+
+ -----------------------------------------------------------------------------
+ ## Cómo ejecutar
+
+ 1) Ejecutar en modo local (SQLite por defecto)
+
+ - Compilar y ejecutar localmente (rápido, usa SQLite):
+
+ ```bash
+ # desde la raíz del repo
+ cargo build --manifest-path crates/flow-api/Cargo.toml
+ cargo run --manifest-path crates/flow-api/Cargo.toml --release
+ ```
+
+ - El server escuchará en `0.0.0.0:3000` por defecto. Accede a:
+   - http://localhost:3000/health
+   - http://localhost:3000/docs
+
+ 2) Ejecutar con Docker Compose (Postgres + API)
+
+ - Levanta servicios (crea .env si no existe):
+
+ ```bash
+ ./scripts/run_flow_api.sh --docker --build
+ ```
+
+ - El script levantará `db` y `flow-api`. La primera compilación dentro del
+   contenedor puede tardar varios minutos (compilación de Rust + dependencias).
+
+ 3) Notas sobre features (pg vs sqlite)
+
+ - Para desarrollo y tests `flow-api` compila con `sqlite` por defecto.
+ - En producción (Docker) el contenedor puede construirse con `--features pg` o
+   `cargo run --features pg` para habilitar soporte Postgres en `chem-persistence`.
+   El `docker-compose.yml` está preparado para ejecutar `cargo run --release --features pg`.
+
+ -----------------------------------------------------------------------------
+ ## Troubleshooting / FAQs
+
+ - Error "chem-persistence was compiled without 'pg' feature":
+   - Significa que el crate `chem-persistence` fue compilado sin el feature de
+     Postgres cuando la `DATABASE_URL` apunta a Postgres. Solución: compilar
+     con la feature `pg` o usar SQLite.
+
+ - La API tarda mucho en responder al levantar con Docker:
+   - La imagen compila `flow-api` dentro del contenedor en modo `--release`.
+     La primera compilación puede tardar varios minutos. Ver logs con:
+
+ ```bash
+ docker-compose logs -f flow-api
+ ```
+
+ - Warnings de "dead_code" en desarrollo:
+   - Algunas funciones auxiliares y variantes de error se marcan con
+     `#[allow(dead_code)]` hasta que se usen en endpoints adicionales. No
+     deberían bloquear la compilación (se silenciaron para -D warnings).
+
+ -----------------------------------------------------------------------------
+ ## Testing
+
+ - Tests unitarios e integración en crates usan SQLite por defecto.
+
+ ```bash
+ # Ejecutar tests del crate flow-api
+ cargo test -p flow-api
+ ```
+
+ - Integrations tests para `chem-persistence` usan `create_temp_sqlite_db()` helper.
+
+ -----------------------------------------------------------------------------
+ ## Estado y próximos pasos
+
+ - Implementado: API y wiring completo, OpenAPI, integración con `chem-workflow`.
+ - Pendiente: lógica de cancelación/limpieza completa, mejoras en docs de seguridad,
+   y estabilizar las migraciones para entornos productivos.
+
+ Si quieres, puedo:
+ - Reiniciar los contenedores Docker con la nueva configuración (rebuild),
+ - Ejecutar compilación y tests localmente para validar todo, o
+ - Añadir ejemplos de requests curl/Postman para cada endpoint.
+
+ -----------------------------------------------------------------------------
+ Créditos y licencias
+ - Código organizado para investigación y prototipado. Revisa `LICENSE` en la raíz.
+
+ -----------------------------------------------------------------------------
 - Python 3.11+ con RDKit (vía conda, para chem-providers)
 
 ## 🔧 Instalación

@@ -22,44 +22,44 @@ use crate::services::CadmaService;
 
 /// Inicializa el sistema de logging
 fn init_logging() {
-  tracing_subscriber::registry()
-    .with(
-      tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| CONFIG.log_level.clone().into()),
-    )
-    .with(tracing_subscriber::fmt::layer())
-    .init();
+  tracing_subscriber::registry().with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                                                                                             CONFIG.log_level.clone().into()
+                                                                                           }))
+                                .with(tracing_subscriber::fmt::layer())
+                                .init();
 }
 
 /// Inicializa los repositorios según la configuración
-fn init_repositories() -> Result<(Arc<dyn flow::repository::FlowRepository>, Arc<chem_persistence::DieselDomainRepository>)> {
+fn init_repositories(
+  )
+    -> Result<(Arc<dyn flow::repository::FlowRepository>, Arc<chem_persistence::DieselDomainRepository>)>
+{
   tracing::info!("Inicializando repositorios...");
   tracing::info!("DATABASE_URL: {}", CONFIG.database_url);
 
   // Determinar el tipo de base de datos
-  let is_postgres = CONFIG.database_url.starts_with("postgres://") 
-    || CONFIG.database_url.starts_with("postgresql://");
-  
+  let is_postgres = CONFIG.database_url.starts_with("postgres://") || CONFIG.database_url.starts_with("postgresql://");
+
   if is_postgres {
     tracing::info!("Usando PostgreSQL");
-    
+
     // Inicializar repos para PostgreSQL
-    let flow_repo = chem_persistence::new_flow_from_env()
-      .map_err(|e| anyhow::anyhow!("Error inicializando flow repository: {}", e))?;
-    
-    let domain_repo = chem_persistence::new_domain_from_env()
-      .map_err(|e| anyhow::anyhow!("Error inicializando domain repository: {}", e))?;
+    let flow_repo =
+      chem_persistence::new_flow_from_env().map_err(|e| anyhow::anyhow!("Error inicializando flow repository: {}", e))?;
+
+    let domain_repo =
+      chem_persistence::new_domain_from_env().map_err(|e| anyhow::anyhow!("Error inicializando domain repository: {}", e))?;
 
     Ok((Arc::new(flow_repo), Arc::new(domain_repo)))
   } else {
     tracing::info!("Usando SQLite");
-    
+
     // Para SQLite (por defecto en chem-persistence)
-    let flow_repo = chem_persistence::new_flow_from_env()
-      .map_err(|e| anyhow::anyhow!("Error inicializando flow repository: {}", e))?;
-    
-    let domain_repo = chem_persistence::new_domain_from_env()
-      .map_err(|e| anyhow::anyhow!("Error inicializando domain repository: {}", e))?;
+    let flow_repo =
+      chem_persistence::new_flow_from_env().map_err(|e| anyhow::anyhow!("Error inicializando flow repository: {}", e))?;
+
+    let domain_repo =
+      chem_persistence::new_domain_from_env().map_err(|e| anyhow::anyhow!("Error inicializando domain repository: {}", e))?;
 
     Ok((Arc::new(flow_repo), Arc::new(domain_repo)))
   }
@@ -70,7 +70,7 @@ fn init_repositories() -> Result<(Arc<dyn flow::repository::FlowRepository>, Arc
 async fn main() -> Result<()> {
   // Cargar configuración
   let config = &*CONFIG;
-  
+
   // Inicializar logging
   init_logging();
 
@@ -89,8 +89,7 @@ async fn main() -> Result<()> {
   let app_state = AppState { cadma_service };
 
   // Crear router con todas las rutas
-  let app = create_router(app_state)
-    .layer(TraceLayer::new_for_http());
+  let app = create_router(app_state).layer(TraceLayer::new_for_http());
 
   // Configurar listener
   let addr = config.server_address();

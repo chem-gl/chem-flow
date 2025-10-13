@@ -29,7 +29,6 @@ use utoipa_swagger_ui::SwaggerUi;
       Step4InputDto,
       Step5InputDto,
       Step6InputDto,
-      
       StartCadmaResponse,
       CadmaExecutionStatus,
       ExecuteStepResponse,
@@ -63,19 +62,17 @@ pub struct ApiDoc;
 /// Crea el router principal con todas las rutas
 pub fn create_router(state: AppState) -> Router {
   // Rutas de API principal con estado
-  let api_routes = Router::new()
-    .route("/flows/cadma/start", post(start_cadma))
-    .route("/flows/cadma", get(list_executions))
-    .route("/flows/cadma/:id", get(get_cadma_status).delete(cancel_execution))
-    .route("/flows/cadma/:id/step", post(execute_step))
-    .with_state(state.clone());
+  let api_routes = Router::new().route("/flows/cadma/start", post(start_cadma))
+                                .route("/flows/cadma", get(list_executions))
+                                .route("/flows/cadma/:id", get(get_cadma_status).delete(cancel_execution))
+                                .route("/flows/cadma/:id/step", post(execute_step))
+                                .with_state(state.clone());
 
   // Health check sin estado
   let health_routes = Router::new().route("/health", get(health_check));
 
   // Router completo combinando todo con Swagger UI
-  Router::new()
-    .merge(health_routes)
-    .nest("/api", api_routes)
-    .merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()))
+  Router::new().merge(health_routes)
+               .nest("/api", api_routes)
+               .merge(SwaggerUi::new("/docs").url("/api-doc/openapi.json", ApiDoc::openapi()))
 }
