@@ -1,10 +1,17 @@
+#[cfg(feature = "python")]
 use pyo3::ffi::c_str;
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
 use pyo3::types::{PyDict, PyModule};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "python")]
 use std::ffi::CString;
+#[cfg(feature = "python")]
 use std::sync::OnceLock;
+#[cfg(feature = "python")]
 static RDKIT_MODULE: OnceLock<Py<PyModule>> = OnceLock::new();
+#[cfg(feature = "python")]
 pub fn init_python() -> PyResult<()> {
   Python::attach(|py| {
     let code = CString::new(include_str!("../python/rdkit_wrapper.py"))?;
@@ -14,6 +21,7 @@ pub fn init_python() -> PyResult<()> {
     Ok(())
   })
 }
+#[cfg(feature = "python")]
 fn get_module(py: Python<'_>) -> PyResult<Py<PyModule>> {
   RDKIT_MODULE.get().map(|module| module.clone_ref(py)).ok_or_else(|| {
                                                          PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
@@ -64,6 +72,7 @@ pub struct Bond {
   pub order: u8,
   pub is_aromatic: bool,
 }
+#[cfg(feature = "python")]
 pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
   Python::attach(|py| {
     let rdkit_py = get_module(py)?;
@@ -79,6 +88,7 @@ pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
 }
 
 /// Fusiona dos moléculas usando RDKit creando un enlace entre atom_a y atom_b.
+#[cfg(feature = "python")]
 pub fn fuse_molecules(smiles_a: &str, smiles_b: &str, atom_a: usize, atom_b: usize, bond_order: u8) -> PyResult<Molecule> {
   Python::attach(|py| {
     let rdkit_py = get_module(py)?;
@@ -108,6 +118,7 @@ mod tests {
     assert_eq!(m.num_atoms, 0);
   }
   #[test]
+  #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
   fn test_get_molecule() {
     // Este test requiere RDKit real, deshabilitar cuando se usa la feature
     // mock_rdkit
@@ -129,6 +140,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
   fn test_structure_atoms_and_bonds() {
     // Este test requiere RDKit real, deshabilitar cuando se usa la feature
     // mock_rdkit
@@ -157,6 +169,7 @@ mod tests {
   }
 
   #[test]
+  #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
   fn test_benzene_aromatic_bonds() {
     // Este test requiere RDKit real, deshabilitar cuando se usa la feature
     // mock_rdkit

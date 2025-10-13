@@ -238,7 +238,10 @@ mod tests {
     let engine = ChemEngine::init().expect("Failed to initialize ChemEngine");
     let molecule = engine.get_molecule("CC").expect("Failed to get molecule");
     assert_eq!(molecule.smiles, "CC");
-    assert!(molecule.inchikey.contains("MOCK"));
+    // Mock InChIKey has format: XXXXXXXXXXXXXX-XXXXXXXXXX-X (14-10-1)
+    assert_eq!(molecule.inchikey.len(), 27); // 14 + 1 + 10 + 1 + 1
+    assert_eq!(molecule.inchikey.chars().filter(|c| *c == '-').count(), 2);
+    assert!(molecule.inchi.starts_with("InChI=MOCK/"));
   }
 
   #[test]
@@ -247,6 +250,9 @@ mod tests {
     let engine = ChemEngine::init().expect("Failed to initialize ChemEngine");
     let result = engine.fuse("CC", "CO", 0, 0, 1).expect("Failed to fuse molecules");
     assert_eq!(result.smiles, "CC.CO");
-    assert!(result.inchikey.contains("MOCK-FUSED"));
+    // Mock InChIKey has format: XXXXXXXXXXXXXX-XXXXXXXXXX-X (14-10-1)
+    assert_eq!(result.inchikey.len(), 27);
+    assert_eq!(result.inchikey.chars().filter(|c| *c == '-').count(), 2);
+    assert!(result.inchi.starts_with("InChI=MOCK/FUSED/"));
   }
 }

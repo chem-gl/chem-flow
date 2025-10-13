@@ -8,7 +8,7 @@ description = "Crate Rust para interactuar con RDKit vía Python"
 license = "MIT"
 
 [features]
-default = ["python"]
+default = ["mock_rdkit"]
 python = ["pyo3"]
 mock_rdkit = ["mockall"]
 testing = ["mock_rdkit", "mockall"]
