@@ -47,7 +47,6 @@ pub struct Molecule {
   /// Estructura detallada: átomos, enlaces y puntos de sustitución
   pub structure: Option<Structure>,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Structure {
   pub atoms: Vec<Atom>,
@@ -55,7 +54,6 @@ pub struct Structure {
   #[serde(default)]
   pub substitution_points: Vec<usize>,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Atom {
   pub index: usize,
@@ -64,7 +62,6 @@ pub struct Atom {
   pub implicit_h: u32,
   pub total_h: u32,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Bond {
   pub atom1: usize,
@@ -86,7 +83,6 @@ pub fn get_molecule(smiles: &str) -> PyResult<Molecule> {
     Ok(molecule)
   })
 }
-
 /// Fusiona dos moléculas usando RDKit creando un enlace entre atom_a y atom_b.
 #[cfg(feature = "python")]
 pub fn fuse_molecules(smiles_a: &str, smiles_b: &str, atom_a: usize, atom_b: usize, bond_order: u8) -> PyResult<Molecule> {
@@ -138,7 +134,6 @@ mod tests {
                                                      // aproximado
     }
   }
-
   #[test]
   #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
   fn test_structure_atoms_and_bonds() {
@@ -167,7 +162,6 @@ mod tests {
       assert!(!s.substitution_points.is_empty(), "Expected substitution points");
     }
   }
-
   #[test]
   #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
   fn test_benzene_aromatic_bonds() {

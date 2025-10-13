@@ -1,11 +1,9 @@
 use super::admetsa_types::{ADMETSAMethod, ADMETSAProperty};
 use chem_domain::{Molecule, OwnedMolecularProperty};
 use uuid::Uuid;
-
 /// Componente reusable para calcular y construir propiedades de moléculas.
 #[derive(Debug, Clone)]
 pub struct PropertyCalculator;
-
 impl PropertyCalculator {
   /// Construye una propiedad calculada (mock) con metadatos comunes.
   pub fn build_calculated_property(&self,
@@ -30,7 +28,6 @@ impl PropertyCalculator {
                              value_hash: format!("{:?}_{}", prop, v),
                              metadata }
   }
-
   /// Construye una propiedad manual con metadatos comunes.
   pub fn build_manual_property(&self,
                                molecule: &Molecule,

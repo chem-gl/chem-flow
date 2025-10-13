@@ -5,7 +5,6 @@ use flow::repository::FlowRepository;
 use flow::stubs::InMemoryFlowRepository;
 use serde_json::json;
 use uuid::Uuid;
-
 #[test]
 fn snapshot_roundtrip_base64_ptr() {
   let repo = InMemoryFlowRepository::new();
@@ -15,7 +14,6 @@ fn snapshot_roundtrip_base64_ptr() {
   let state_bytes = serde_json::to_vec(&state).unwrap();
   let b64 = base64::engine::general_purpose::STANDARD.encode(state_bytes);
   let snap_id = repo.save_snapshot(&fid, 2, &b64, json!({"fmt":"json"})).unwrap();
-
   let (bytes, meta) = repo.load_snapshot(&snap_id).unwrap();
   assert_eq!(meta.cursor, 2);
   let b64_back = String::from_utf8(bytes).unwrap();
@@ -24,7 +22,6 @@ fn snapshot_roundtrip_base64_ptr() {
   assert_eq!(state_back["current_step"], 2);
   assert_eq!(state_back["status"], "running");
 }
-
 #[test]
 fn create_branch_without_artificial_record_and_count() {
   let repo = InMemoryFlowRepository::new();
@@ -54,7 +51,6 @@ fn create_branch_without_artificial_record_and_count() {
   assert_eq!(parent_count, 2);
   assert_eq!(branch_count, 2);
 }
-
 #[test]
 fn set_meta_preserves_other_fields() {
   let repo = InMemoryFlowRepository::new();
@@ -65,7 +61,6 @@ fn set_meta_preserves_other_fields() {
   assert_eq!(repo.get_meta(&fid, "a").unwrap(), json!(10));
   assert_eq!(repo.get_meta(&fid, "b").unwrap(), json!(2));
 }
-
 #[test]
 fn snapshot_roundtrip_base64_bytes() {
   let repo = InMemoryFlowRepository::new();
@@ -81,7 +76,6 @@ fn snapshot_roundtrip_base64_bytes() {
   let state_back: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
   assert_eq!(state, state_back);
 }
-
 #[test]
 fn branch_creation_without_artificial_records() {
   let repo = InMemoryFlowRepository::new();
@@ -106,7 +100,6 @@ fn branch_creation_without_artificial_records() {
   let meta = repo.get_flow_meta(&branch_id).unwrap();
   assert_eq!(meta.current_cursor, 2);
 }
-
 #[test]
 fn metadata_update_preserves_existing_fields() {
   let repo = InMemoryFlowRepository::new();

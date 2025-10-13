@@ -6,16 +6,13 @@ set -euo pipefail
 # Postgres + RDKit (Python) dentro del contenedor app-dev.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
-
 echo "Iniciando servicios docker-compose (db, app-dev) para ejemplos..."
 docker-compose up -d db app-dev
-
 DB_CONTAINER=$(docker-compose ps -q db)
 if [ -z "$DB_CONTAINER" ]; then
   echo "No se encontró el contenedor de la base de datos (db)." >&2
   exit 1
 fi
-
 # Esperar a que Postgres esté healthy
 for i in $(seq 1 60); do
   STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$DB_CONTAINER" 2>/dev/null || echo "unknown")
@@ -25,13 +22,11 @@ for i in $(seq 1 60); do
   echo "Esperando a db (estado: $STATUS)..."
   sleep 2
 done
-
 APP_DEV_CONTAINER=$(docker-compose ps -q app-dev)
 if [ -z "$APP_DEV_CONTAINER" ]; then
   echo "No se encontró el contenedor app-dev." >&2
   exit 1
 fi
-
 # Variables para Postgres (usa .env si está disponible)
 DB_USER=${DATABASE_USER:-admin}
 DB_PASS=${DATABASE_PASS:-admin123}
@@ -40,7 +35,6 @@ DB_NAME=${DATABASE_NAME:-mydatabase}
 DB_HOST=db
 DB_PORT=5432
 PG_URL="postgres://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-
 echo
 echo "Selecciona qué ejemplo quieres ejecutar:"
 echo "  1) example-domain (dominio)"
@@ -97,7 +91,6 @@ docker-compose exec \
       ;;
   esac
 '
-
 EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
   echo "Alguno de los ejemplos falló (exit $EXIT_CODE)." >&2

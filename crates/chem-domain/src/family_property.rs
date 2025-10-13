@@ -4,7 +4,6 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct FamilyProperty<'a, V, M> {
   id: Uuid,
@@ -16,7 +15,6 @@ pub struct FamilyProperty<'a, V, M> {
   value_hash: String,
   metadata: M,
 }
-
 impl<'a, V, M> FamilyProperty<'a, V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
@@ -48,49 +46,38 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
               value_hash,
               metadata })
   }
-
   pub fn id(&self) -> Uuid {
     self.id
   }
-
   pub fn family_id(&self) -> Uuid {
     self.family.id()
   }
-
   pub fn quick_new(family: &'a MoleculeFamily, property_type: &str, value: V) -> Result<Self, DomainError>
     where M: Default
   {
     Self::new(family, property_type, value, None, false, M::default())
   }
-
   pub fn family(&self) -> &MoleculeFamily {
     self.family
   }
-
   pub fn property_type(&self) -> &str {
     &self.property_type
   }
-
   pub fn value(&self) -> &V {
     &self.value
   }
-
   pub fn quality(&self) -> Option<&str> {
     self.quality.as_deref()
   }
-
   pub fn preferred(&self) -> bool {
     self.preferred
   }
-
   pub fn metadata(&self) -> &M {
     &self.metadata
   }
-
   pub fn value_hash(&self) -> &str {
     &self.value_hash
   }
-
   pub fn with_quality(&self, quality: Option<String>) -> Result<Self, DomainError> {
     Self::new(self.family,
               &self.property_type,
@@ -99,7 +86,6 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
               self.preferred,
               self.metadata.clone())
   }
-
   pub fn with_metadata(&self, metadata: M) -> Result<Self, DomainError> {
     Self::new(self.family,
               &self.property_type,
@@ -108,7 +94,6 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
               self.preferred,
               metadata)
   }
-
   pub fn with_preferred(&self, preferred: bool) -> Result<Self, DomainError> {
     Self::new(self.family,
               &self.property_type,
@@ -117,11 +102,9 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
               preferred,
               self.metadata.clone())
   }
-
   pub fn is_equivalent(&self, other: &Self) -> bool {
     self.value_hash == other.value_hash
   }
-
   pub fn verify_integrity(&self) -> Result<bool, DomainError> {
     let mut hasher = Sha256::new();
     hasher.update(self.family.family_hash().as_bytes());
@@ -134,7 +117,6 @@ impl<'a, V, M> FamilyProperty<'a, V, M>
     Ok(calculated_hash == self.value_hash)
   }
 }
-
 impl<'a, V, M> fmt::Display for FamilyProperty<'a, V, M>
   where V: fmt::Debug,
         M: fmt::Debug
@@ -145,7 +127,6 @@ impl<'a, V, M> fmt::Display for FamilyProperty<'a, V, M>
            self.id, self.property_type, self.preferred)
   }
 }
-
 impl<'a, V, M> PartialEq for FamilyProperty<'a, V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
@@ -154,13 +135,11 @@ impl<'a, V, M> PartialEq for FamilyProperty<'a, V, M>
     self.is_equivalent(other)
   }
 }
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::MoleculeFamily;
   use serde_json::json;
-
   #[test]
   fn test_family_property_creation() -> Result<(), DomainError> {
     let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
@@ -180,7 +159,6 @@ mod tests {
     assert!(property.verify_integrity()?);
     Ok(())
   }
-
   #[test]
   fn test_family_property_equivalence() -> Result<(), DomainError> {
     let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
@@ -199,7 +177,6 @@ mod tests {
     assert_eq!(prop1, prop2);
     Ok(())
   }
-
   #[test]
   fn test_family_property_empty_type() -> Result<(), DomainError> {
     let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",

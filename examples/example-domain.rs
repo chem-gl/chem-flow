@@ -84,7 +84,6 @@ fn list_all_molecules(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<
   }
   Ok(())
 }
-
 // Helper: devuelve valores mock por método y propiedad (usado en el ejemplo)
 fn mock_value_for_method(method: &str, prop: &str) -> Option<f64> {
   match method {
@@ -138,7 +137,6 @@ fn create_from_smiles(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<
   // TODO Phase 4: Re-enable after PropertyProvider implementation
   println!("NOTA: from_smiles no disponible en Phase 2. Use from_parts con datos conocidos.");
   println!("Ejemplo: CCO -> InChIKey=LFQSCWFLJHTTHZ-UHFFFAOYSA-N, InChI=InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3");
-
   // For now, create a hardcoded example
   match Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
                              "CCO",
@@ -167,7 +165,6 @@ fn add_property_interactive(repo: &dyn chem_domain::AllDomainPorts) -> Result<()
       println!("2) Generar propiedades por MÉTODO mock (Random1/Random2/Random3/Random4)");
       println!("3) Ingresar MANUALMENTE valores para TODAS las propiedades requeridas");
       let mode = prompt("Seleccione modo (1/2/3): ")?;
-
       // listado de propiedades (coincide con ADMETSA)
       let properties = vec!["LogP",
                             "PSA",
@@ -180,7 +177,6 @@ fn add_property_interactive(repo: &dyn chem_domain::AllDomainPorts) -> Result<()
                             "Mutagenicity",
                             "DevelopmentalToxicity",
                             "SyntheticAccessibility"];
-
       match mode.trim() {
         "1" => {
           // Modo clásico: una propiedad
@@ -229,7 +225,6 @@ fn add_property_interactive(repo: &dyn chem_domain::AllDomainPorts) -> Result<()
               return Ok(());
             }
           };
-
           // Generar y guardar todas las propiedades que el método mock produce
           for &prop in properties.iter() {
             // calcular mock

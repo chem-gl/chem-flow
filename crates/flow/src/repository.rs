@@ -53,9 +53,7 @@ pub trait FlowRepository: Send + Sync {
   /// Cuenta cuántos pasos (`FlowData`) tiene un flow. Debe devolver
   /// -1 si el flow no existe, 0 si existe pero no tiene pasos.
   fn count_steps(&self, flow_id: &Uuid) -> Result<i64>;
-
   fn delete_branch(&self, flow_id: &Uuid) -> Result<()>;
-
   fn delete_from_step(&self, flow_id: &Uuid, from_cursor: i64) -> Result<()>;
   /// Lock ligero para actualizaciones (puede mapear a check de versión).
   fn lock_for_update(&self, flow_id: &Uuid, expected_version: i64) -> Result<bool>;

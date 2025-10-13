@@ -32,18 +32,15 @@ impl MoleculeReader for InMemoryDomainRepository {
     let molecules = self.lock_map(&self.molecules, "molecules")?;
     Ok(molecules.get(inchikey).cloned())
   }
-
   fn find_by_smiles(&self, smiles: &str) -> Result<Vec<Molecule>, DomainError> {
     let molecules = self.lock_map(&self.molecules, "molecules")?;
     Ok(molecules.values().filter(|m| m.smiles() == smiles).cloned().collect())
   }
-
   fn list_molecules(&self) -> Result<Vec<Molecule>, DomainError> {
     let molecules = self.lock_map(&self.molecules, "molecules")?;
     Ok(molecules.values().cloned().collect())
   }
 }
-
 // Implementación de MoleculeWriter
 impl MoleculeWriter for InMemoryDomainRepository {
   fn save_molecule(&self, molecule: Molecule) -> Result<String, DomainError> {
@@ -52,7 +49,6 @@ impl MoleculeWriter for InMemoryDomainRepository {
     molecules.insert(key.clone(), molecule);
     Ok(key)
   }
-
   fn delete_molecule(&self, inchikey: &str) -> Result<(), DomainError> {
     // Check families first
     let families = self.lock_map(&self.families, "families")?;
@@ -64,13 +60,11 @@ impl MoleculeWriter for InMemoryDomainRepository {
       }
     }
     drop(families);
-
     let mut molecules = self.lock_map(&self.molecules, "molecules")?;
     molecules.remove(inchikey);
     Ok(())
   }
 }
-
 // Implementación de FamilyRepository
 impl FamilyRepository for InMemoryDomainRepository {
   fn save_family(&self, family: MoleculeFamily) -> Result<Uuid, DomainError> {
@@ -79,34 +73,28 @@ impl FamilyRepository for InMemoryDomainRepository {
     families.insert(id, family);
     Ok(id)
   }
-
   fn get_family(&self, id: &Uuid) -> Result<Option<MoleculeFamily>, DomainError> {
     let families = self.lock_map(&self.families, "families")?;
     Ok(families.get(id).cloned())
   }
-
   fn list_families(&self) -> Result<Vec<MoleculeFamily>, DomainError> {
     let families = self.lock_map(&self.families, "families")?;
     Ok(families.values().cloned().collect())
   }
-
   fn delete_family(&self, id: &Uuid) -> Result<(), DomainError> {
     let mut families = self.lock_map(&self.families, "families")?;
     families.remove(id);
-
     // Remove family properties
     let mut fps = self.lock_map(&self.family_properties, "family_properties")?;
     fps.retain(|_, v| &v.family_id != id);
     Ok(())
   }
-
   fn add_molecule_to_family(&self, family_id: &Uuid, molecule: Molecule) -> Result<Uuid, DomainError> {
     let fam_opt = self.get_family(family_id)?;
     let fam = fam_opt.ok_or_else(|| DomainError::not_found("MoleculeFamily", family_id.to_string()))?;
     let new_fam = fam.add_molecule(molecule)?;
     self.save_family(new_fam)
   }
-
   fn remove_molecule_from_family(&self, family_id: &Uuid, inchikey: &str) -> Result<Uuid, DomainError> {
     let fam_opt = self.get_family(family_id)?;
     let fam = fam_opt.ok_or_else(|| DomainError::not_found("MoleculeFamily", family_id.to_string()))?;
@@ -114,7 +102,6 @@ impl FamilyRepository for InMemoryDomainRepository {
     self.save_family(new_fam)
   }
 }
-
 // Implementación de PropertyRepository
 impl PropertyRepository for InMemoryDomainRepository {
   fn save_family_property(&self, prop: OwnedFamilyProperty) -> Result<Uuid, DomainError> {
@@ -123,19 +110,16 @@ impl PropertyRepository for InMemoryDomainRepository {
     map.insert(id, prop);
     Ok(id)
   }
-
   fn get_family_properties(&self, family_id: &Uuid) -> Result<Vec<OwnedFamilyProperty>, DomainError> {
     let map = self.lock_map(&self.family_properties, "family_properties")?;
     Ok(map.values().filter(|p| &p.family_id == family_id).cloned().collect())
   }
-
   fn save_molecular_property(&self, prop: OwnedMolecularProperty) -> Result<Uuid, DomainError> {
     let id = prop.id;
     let mut map = self.lock_map(&self.molecular_properties, "molecular_properties")?;
     map.insert(id, prop);
     Ok(id)
   }
-
   fn get_molecular_properties(&self, inchikey: &str) -> Result<Vec<OwnedMolecularProperty>, DomainError> {
     let map = self.lock_map(&self.molecular_properties, "molecular_properties")?;
     Ok(map.values().filter(|p| p.molecule_inchikey == inchikey).cloned().collect())
@@ -183,7 +167,6 @@ mod tests {
   use crate::{DomainError, InMemoryDomainRepository, MoleculeFamily, OwnedFamilyProperty, OwnedMolecularProperty};
   use serde_json::json;
   use std::thread;
-
   #[test]
   fn save_and_get_family() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -203,7 +186,6 @@ mod tests {
     assert_eq!(lf.len(), 2);
     Ok(())
   }
-
   #[test]
   fn save_and_get_molecule() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -217,7 +199,6 @@ mod tests {
     assert_eq!(loaded.unwrap().inchikey(), m.inchikey());
     Ok(())
   }
-
   #[test]
   fn save_and_get_properties() -> Result<(), DomainError> {
     let repo = InMemoryDomainRepository::new();
@@ -255,7 +236,6 @@ mod tests {
     assert_eq!(loaded_fp.len(), 1);
     Ok(())
   }
-
   #[test]
   fn mutex_poisoning_returns_error() {
     let repo = InMemoryDomainRepository::new();

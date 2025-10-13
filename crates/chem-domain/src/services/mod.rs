@@ -9,9 +9,7 @@
 //! - Use dependency injection via ports
 //! - Exhaustive error handling
 //! - Immutable data flow
-
 pub mod family_service;
 pub mod molecule_service;
-
 pub use family_service::FamilyService;
 pub use molecule_service::MoleculeService;

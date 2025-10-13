@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
 use uuid::Uuid;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CadmaState {
   pub current_step: u32,
@@ -25,7 +24,6 @@ pub struct CadmaState {
   pub metadata: JsonValue,
   pub status: String,
 }
-
 impl Default for CadmaState {
   fn default() -> Self {
     CadmaState { current_step: 0,
@@ -34,7 +32,6 @@ impl Default for CadmaState {
                  status: "not_started".to_string() }
   }
 }
-
 #[derive(Clone)]
 pub struct CadmaFlow {
   pub id: Uuid,
@@ -42,7 +39,6 @@ pub struct CadmaFlow {
   pub flow_repo: Arc<dyn FlowRepository>,
   pub domain_repo: Arc<dyn AllDomainPorts>,
 }
-
 crate::impl_chemical_flow!(
   CadmaFlow,
   CadmaState,

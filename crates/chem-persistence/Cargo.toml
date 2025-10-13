@@ -2,7 +2,6 @@
 name = "chem-persistence"
 version = "0.1.0"
 edition = "2021"
-
 [features]
 default = ["sqlite"]
 postgres = ["diesel/postgres", "diesel_migrations/postgres"]
@@ -12,7 +11,6 @@ no-artifact-insert = []
 testing = ["sqlite", "tempfile"]
 mock_rdkit = ["chem-domain/mock_rdkit"]
 integration_tests_disabled = []
-
 [dependencies]
 flow = { path = "../flow" }
 chem-domain = { path = "../chem-domain" }
@@ -29,10 +27,8 @@ once_cell = "1.19"
 log = "0.4"
 tempfile = { version = "3.10", optional = true }
 anyhow = "1.0"
-
 [dev-dependencies]
 serde_json = "1.0"
-
 [[example]]
 name = "persistence_simple_usage"
 required-features = ["postgres"]

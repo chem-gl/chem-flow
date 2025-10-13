@@ -15,20 +15,16 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
-
 /// Integration test that executes the full Cadma flow, branching after each
 /// step while exercising different method configurations per stage.
 #[test]
 fn cadma_flow_branching_runs_all_steps() {
   let flow_repo = Arc::new(InMemoryFlowRepository::new());
   let domain_repo = Arc::new(InMemoryDomainRepository::new());
-
   let flow_id = flow_repo.create_flow(Some("cadma-e2e".into()), Some("active".into()), json!({})).unwrap();
   let flow = CadmaFlow::construct_with_repos(flow_id, flow_repo.clone(), domain_repo.clone());
   let ctx = StepContext::new(flow_id, flow_repo.clone(), domain_repo.clone());
-
   let mut branch_records: Vec<(Uuid, i64, String)> = Vec::new();
-
   // Step 1 - create a family from explicit molecules (manual mode)
   let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N", // ethanol InChIKey
                                   "CCO",
@@ -51,7 +47,6 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step1"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step1".into()));
-
   // Step 2 - mix manual overrides and random methods
   let mut method_map: MethodPropertyMap = HashMap::new();
   method_map.insert(ADMETSAProperty::LogP, ADMETSAMethod::Manual);
@@ -70,7 +65,6 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step2"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step2".into()));
-
   // Step 3 - random generation strategy
   let random_candidates = vec!["CCN".to_string(), "CCCO".to_string()];
   let s3_input = Step3Input { method: GenerationMethod::Random { candidates: random_candidates.clone() } };
@@ -82,7 +76,6 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step3"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step3".into()));
-
   // Step 4 - override methods + manual values for initial molecules
   let mut step4_manuals: ManualValues = HashMap::new();
   let mut manual_props = HashMap::new();
@@ -99,7 +92,6 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step4"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step4".into()));
-
   // Prepare substitute family for Step 5
   let substitute_member = Molecule::from_parts("VNWKTOKETHGBQD-UHFFFAOYSA-N", // methane InChIKey
                                                "C",
@@ -107,7 +99,6 @@ fn cadma_flow_branching_runs_all_steps() {
                                                serde_json::json!({"phase": 2, "source": "test_hardcoded"})).unwrap();
   let substitute_family = MoleculeFamily::new(vec![substitute_member.clone()], json!({"origin":"branching-test"})).unwrap();
   let substitute_family_id = domain_repo.save_family(substitute_family).unwrap();
-
   // Step 5 - enable saving and include principal molecules
   let s5_input = Step5Input { substitute_family_id: Some(substitute_family_id),
                               principal_join_points: None,
@@ -134,7 +125,6 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step5"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step5".into()));
-
   // Step 6 - reuse Step5 output with distinct override methods
   let s6_input = Step6Input { override_methods: Some(vec![ADMETSAMethod::Random3]), manual_values: None };
   let step6 = flow.get_step_by_index(5).expect("step6");
@@ -147,10 +137,8 @@ fn cadma_flow_branching_runs_all_steps() {
   let meta = flow_repo.get_flow_meta(&flow_id).unwrap();
   let branch_id = flow_repo.create_branch(&flow_id, meta.current_cursor, json!({"branch":"step6"})).unwrap();
   branch_records.push((branch_id, meta.current_cursor, "Step6".into()));
-
   // Flow should have one record per step
   assert_eq!(flow_repo.count_steps(&flow_id).unwrap(), 6);
-
   // Verify branches reflect the snapshot after each step
   let (metas, _) = flow_repo.dump_tables_for_debug().unwrap();
   for (branch_id, cursor, label) in branch_records {

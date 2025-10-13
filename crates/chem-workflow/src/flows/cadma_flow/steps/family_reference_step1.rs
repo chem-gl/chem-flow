@@ -4,7 +4,6 @@
 //! duplicados por InChIKey, y o bien seleccionar una familia existente (caso
 //! simple) o crear/fusionar una nueva familia persistida mediante los ports
 //! del dominio.
-
 use crate::errors::WorkflowError;
 use crate::step::{StepContext, StepInfo};
 use chem_domain::{Molecule, MoleculeFamily};
@@ -13,10 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
 use uuid::Uuid;
-
 #[derive(Default, Clone)]
 pub struct FamilyReferenceStep1;
-
 /// Entrada del paso: IDs de familias, moléculas explícitas y opcional
 /// nombre/desc de nueva familia.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +23,6 @@ pub struct Step1Input {
   pub new_family_name: Option<String>,
   pub new_family_description: Option<String>,
 }
-
 /// Payload que se persiste en flow_data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step1Payload {
@@ -34,7 +30,6 @@ pub struct Step1Payload {
   pub step_result: String,
   pub molecules_count: usize,
 }
-
 /// Metadatos legibles para auditoría / UI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step1Metadata {
@@ -42,14 +37,12 @@ pub struct Step1Metadata {
   pub parameters: Step1Params,
   pub domain_refs: Vec<String>, // inchikeys + family id
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step1Params {
   pub families: Option<Vec<Uuid>>,
   pub molecules_count: usize,
   pub new_family_name: Option<String>,
 }
-
 impl FamilyReferenceStep1 {
   /// Caso rápido: si el usuario sólo pasó UNA familia y no pidió crear una
   /// nueva, seleccionamos esa familia y devolvemos su payload/metadata sin
@@ -87,7 +80,6 @@ impl FamilyReferenceStep1 {
                               -> Result<Vec<Molecule>, WorkflowError> {
     let mut seen = HashSet::<String>::new();
     let mut out = Vec::new();
-
     if let Some(explicit_mols) = explicit {
       for m in explicit_mols {
         let key = m.inchikey().to_string();
@@ -96,7 +88,6 @@ impl FamilyReferenceStep1 {
         }
       }
     }
-
     if let Some(fids) = families {
       for fid in fids {
         let family = ctx.domain_repo
@@ -111,10 +102,8 @@ impl FamilyReferenceStep1 {
         }
       }
     }
-
     Ok(out)
   }
-
   /// Construye y persiste una nueva familia usando los ports del dominio.
   fn create_and_save_family(&self,
                             ctx: &StepContext,
@@ -149,42 +138,34 @@ impl FamilyReferenceStep1 {
     let total = stored_family.molecules().len();
     Ok((saved_id, total, domain_refs))
   }
-
   /// Implementación principal del execute: combina los helpers previos.
   fn execute_step_impl(&self, ctx: &StepContext, input: Step1Input) -> Result<StepInfo, WorkflowError> {
     if let Some(info) = self.try_select_single_existing(ctx, &input)? {
       return Ok(info);
     }
-
     let explicit_count = input.molecules.as_ref().map_or(0, |v| v.len());
     let collected = self.collect_unique_molecules(ctx, &input.families, &input.molecules)?;
-
     if collected.is_empty() {
       return Err(WorkflowError::Validation("No hay moléculas (ni en familias ni explícitas) para crear/fusionar una \
                                             familia"
                                                     .into()));
     }
-
     let (saved_id, total_molecules, domain_refs) = self.create_and_save_family(ctx,
                                                                                collected,
                                                                                input.new_family_name.clone(),
                                                                                input.new_family_description.clone())?;
-
     let payload = Step1Payload { family_uuid: saved_id,
                                  step_result: format!("Familia creada/fusionada: {} ({} moléculas)",
                                                       saved_id, total_molecules),
                                  molecules_count: total_molecules };
-
     let metadata = Step1Metadata { status: "completed".to_string(),
                                    parameters: Step1Params { families: input.families,
                                                              molecules_count: explicit_count,
                                                              new_family_name: input.new_family_name },
                                    domain_refs };
-
     Ok(StepInfo { payload: serde_json::to_value(payload)?, metadata: serde_json::to_value(metadata)? })
   }
 }
-
 crate::impl_workflow_step!(FamilyReferenceStep1,
                            Step1Payload,
                            Step1Metadata,

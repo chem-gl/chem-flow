@@ -4,7 +4,6 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use uuid::Uuid;
-
 #[derive(Debug, Clone)]
 pub struct MolecularProperty<'a, V, M> {
   id: Uuid,
@@ -16,7 +15,6 @@ pub struct MolecularProperty<'a, V, M> {
   value_hash: String,
   metadata: M,
 }
-
 impl<'a, V, M> MolecularProperty<'a, V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
@@ -48,39 +46,30 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
               value_hash,
               metadata })
   }
-
   pub fn value_hash(&self) -> &str {
     &self.value_hash
   }
-
   pub fn id(&self) -> Uuid {
     self.id
   }
-
   pub fn molecule(&self) -> &Molecule {
     self.molecule
   }
-
   pub fn property_type(&self) -> &str {
     &self.property_type
   }
-
   pub fn value(&self) -> &V {
     &self.value
   }
-
   pub fn quality(&self) -> Option<&str> {
     self.quality.as_deref()
   }
-
   pub fn preferred(&self) -> bool {
     self.preferred
   }
-
   pub fn metadata(&self) -> &M {
     &self.metadata
   }
-
   pub fn with_quality(&self, quality: Option<String>) -> Result<Self, DomainError> {
     Self::new(self.molecule,
               &self.property_type,
@@ -89,7 +78,6 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
               self.preferred,
               self.metadata.clone())
   }
-
   pub fn with_metadata(&self, metadata: M) -> Result<Self, DomainError> {
     Self::new(self.molecule,
               &self.property_type,
@@ -98,7 +86,6 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
               self.preferred,
               metadata)
   }
-
   pub fn with_preferred(&self, preferred: bool) -> Result<Self, DomainError> {
     Self::new(self.molecule,
               &self.property_type,
@@ -107,11 +94,9 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
               preferred,
               self.metadata.clone())
   }
-
   pub fn is_equivalent(&self, other: &Self) -> bool {
     self.value_hash == other.value_hash
   }
-
   pub fn verify_integrity(&self) -> Result<bool, DomainError> {
     let mut hasher = Sha256::new();
     hasher.update(self.molecule.inchikey().as_bytes());
@@ -124,7 +109,6 @@ impl<'a, V, M> MolecularProperty<'a, V, M>
     Ok(calculated_hash == self.value_hash)
   }
 }
-
 impl<'a, V, M> fmt::Display for MolecularProperty<'a, V, M>
   where V: fmt::Debug,
         M: fmt::Debug
@@ -135,7 +119,6 @@ impl<'a, V, M> fmt::Display for MolecularProperty<'a, V, M>
            self.id, self.property_type, self.preferred)
   }
 }
-
 impl<'a, V, M> PartialEq for MolecularProperty<'a, V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone

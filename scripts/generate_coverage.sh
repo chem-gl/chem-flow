@@ -26,7 +26,6 @@ if [ "${BUILD_RUNTIME:-0}" = "1" ]; then
 else
   echo "[coverage] salto construcción runtime (para forzar exporta BUILD_RUNTIME=1)"
 fi
-
 echo "[coverage] Ejecutando contenedor para generar coverage..."
 mkdir -p coverage
 # HOST cache directory (opcional). Si se exporta HOST_CACHE_DIR el script
@@ -70,7 +69,6 @@ else
     "-v ${V_PIP_CACHE}:/root/.cache/pip"
   )
 fi
-
 # Nombre único para el contenedor (para limpieza en trap)
 CN="flow-coverage-$$-$(date +%s)"
 cleanup() {

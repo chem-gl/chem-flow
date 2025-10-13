@@ -3,7 +3,6 @@ use flow::domain::{FlowData, PersistResult};
 use flow::repository::FlowRepository;
 use flow::stubs::InMemoryFlowRepository;
 use uuid::Uuid;
-
 fn mk_step(flow_id: Uuid, cursor: i64, name: &str) -> FlowData {
   FlowData { id: Uuid::new_v4(),
              flow_id,
@@ -14,7 +13,6 @@ fn mk_step(flow_id: Uuid, cursor: i64, name: &str) -> FlowData {
              command_id: None,
              created_at: Utc::now() }
 }
-
 #[test]
 fn branching_and_rehydration_workflow_tree() {
   let repo = InMemoryFlowRepository::new();
@@ -56,7 +54,6 @@ fn branching_and_rehydration_workflow_tree() {
   // branch created at cursor 3 should remain
   assert!(repo.branch_exists(&branch_id).unwrap());
 }
-
 #[test]
 fn recursive_delete_branch_removes_subtree() {
   let repo = InMemoryFlowRepository::new();
@@ -77,7 +74,6 @@ fn recursive_delete_branch_removes_subtree() {
   assert!(!repo.branch_exists(&a).unwrap());
   assert!(!repo.branch_exists(&b).unwrap());
 }
-
 #[test]
 fn duplicate_payload_guard_prevents_insertion() {
   let repo = InMemoryFlowRepository::new();

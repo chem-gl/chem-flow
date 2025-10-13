@@ -87,7 +87,6 @@ impl StepContext {
                           created_at: Utc::now() };
     self.flow_repo.persist_data(&data, ev).map_err(Into::into)
   }
-
   /// Obtiene el último payload para un paso por nombre, decodificado a T.
   pub fn get_step_payload_by_name_typed<T>(&self, step_name: &str) -> Result<Option<T>, WorkflowError>
     where T: DeserializeOwned
@@ -103,7 +102,6 @@ impl StepContext {
     }
     Ok(None)
   }
-
   /// Obtiene el último payload de cualquier paso que pueda ser decodificado a
   /// T.
   pub fn get_last_step_payload_any_typed<T>(&self) -> Result<Option<T>, WorkflowError>

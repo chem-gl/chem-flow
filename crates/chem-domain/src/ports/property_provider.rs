@@ -1,11 +1,9 @@
 // ports/property_provider.rs
 //! Port para proveer funcionalidad química (cálculos, conversiones,
 //! estructuras). Será implementado por adapters como RDKit, ChemAxon, etc.
-
 use crate::DomainError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-
 /// Estructura molecular serializable (reemplaza la de chem-providers)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MoleculeStructure {
@@ -14,7 +12,6 @@ pub struct MoleculeStructure {
   /// Formato de la estructura (e.g., "mol", "sdf", "pdb")
   pub format: String,
 }
-
 /// Tipos de propiedades calculables
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropertyType {
@@ -33,7 +30,6 @@ pub enum PropertyType {
   /// Propiedad personalizada
   Custom(String),
 }
-
 impl std::fmt::Display for PropertyType {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
@@ -47,7 +43,6 @@ impl std::fmt::Display for PropertyType {
     }
   }
 }
-
 /// Información básica de una molécula generada por el provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderMolecule {
@@ -66,21 +61,17 @@ pub struct ProviderMolecule {
   /// Estructura 3D/2D opcional
   pub structure: Option<MoleculeStructure>,
 }
-
 /// Port para proveedor de funcionalidad química
 pub trait PropertyProvider: Send + Sync {
   /// Genera una molécula a partir de SMILES
   fn get_molecule_from_smiles(&self, smiles: &str) -> Result<ProviderMolecule, DomainError>;
-
   /// Calcula propiedades para un SMILES dado
   fn calculate_properties(&self,
                           smiles: &str,
                           properties: &[PropertyType])
                           -> Result<HashMap<PropertyType, f64>, DomainError>;
-
   /// Valida si un SMILES es válido
   fn validate_smiles(&self, smiles: &str) -> Result<bool, DomainError>;
-
   /// Genera estructura 2D/3D
   fn generate_structure(&self, smiles: &str, format: &str) -> Result<MoleculeStructure, DomainError>;
 }

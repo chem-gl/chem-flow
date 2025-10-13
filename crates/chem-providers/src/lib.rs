@@ -5,32 +5,26 @@ pub mod core;
 #[cfg(any(test, feature = "mock_rdkit"))]
 pub mod test_utils;
 pub use core::Molecule;
-
 // Make the EngineError serializable for better test handling
 #[derive(Debug, Error, Clone)]
 pub enum EngineError {
   #[cfg(feature = "python")]
   #[error("Error inicializando Python/RDKit: {0}")]
   Init(String),
-
   #[cfg(feature = "python")]
   #[error("Error obteniendo molécula: {0}")]
   GetMolecule(String),
-
   #[error("Error de validación: {0}")]
   Validation(String),
-
   #[error("Error interno: {0}")]
   Internal(String),
 }
-
 #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
 impl From<PyErr> for EngineError {
   fn from(err: PyErr) -> Self {
     EngineError::Internal(err.to_string())
   }
 }
-
 // Define trait for mock capability
 #[cfg_attr(any(test, feature = "mock_rdkit"), mockall::automock)]
 pub trait ChemEngineInterface: Send + Sync {
@@ -45,12 +39,10 @@ pub trait ChemEngineInterface: Send + Sync {
   fn substitution_points(&self, molecule: &Molecule) -> Vec<usize>;
   fn feasible_bond(&self, mol_a: &Molecule, idx_a: usize, mol_b: &Molecule, idx_b: usize, bond_order: u8) -> bool;
 }
-
 /// Motor químico que proporciona acceso a funcionalidades de RDKit vía Python
 pub struct ChemEngine {
   _private: (),
 }
-
 impl ChemEngine {
   pub fn init() -> Result<Self, EngineError> {
     #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
@@ -58,16 +50,13 @@ impl ChemEngine {
       // Delegamos la inicialización al módulo core
       core::init_python().map_err(|e| EngineError::Init(e.to_string()))?;
     }
-
     #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock, simplemente creamos la instancia sin inicializar Python
     }
-
     Ok(Self { _private: () })
   }
 }
-
 impl ChemEngineInterface for ChemEngine {
   fn get_molecule(&self, smiles: &str) -> Result<Molecule, EngineError> {
     #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
@@ -76,18 +65,15 @@ impl ChemEngineInterface for ChemEngine {
       if smiles.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
-
       // Llamamos al método de Python
       core::get_molecule(smiles).map_err(|e| EngineError::GetMolecule(e.to_string()))
     }
-
     #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock sin Python, devolvemos una molécula predefinida
       if smiles.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
-
       // Genera un InChIKey pseudo-válido (14-10-1, A-Z y 0-9)
       fn mock_inchikey(seed: &str) -> String {
         let bytes = seed.as_bytes();
@@ -104,7 +90,6 @@ impl ChemEngineInterface for ChemEngine {
         let s3: String = out.iter().skip(24).take(1).collect();
         format!("{}-{}-{}", s1, s2, s3)
       }
-
       Ok(Molecule { inchikey: mock_inchikey(smiles),
                     inchi: format!("InChI=MOCK/{}", smiles),
                     smiles: smiles.to_string(),
@@ -120,7 +105,6 @@ impl ChemEngineInterface for ChemEngine {
                                                       substitution_points: vec![0] }) })
     }
   }
-
   fn fuse(&self,
           smiles_a: &str,
           smiles_b: &str,
@@ -134,20 +118,17 @@ impl ChemEngineInterface for ChemEngine {
       if smiles_a.trim().is_empty() || smiles_b.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
-
       // Llamamos al método de Python
       core::fuse_molecules(smiles_a, smiles_b, _atom_a, _atom_b, _bond_order).map_err(|e| {
                                                                                EngineError::GetMolecule(e.to_string())
                                                                              })
     }
-
     #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock sin Python, combinamos los SMILES
       if smiles_a.trim().is_empty() || smiles_b.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
-
       fn mock_inchikey(seed: &str) -> String {
         let bytes = seed.as_bytes();
         let mut out: Vec<char> = Vec::with_capacity(25);
@@ -163,7 +144,6 @@ impl ChemEngineInterface for ChemEngine {
         let s3: String = out.iter().skip(24).take(1).collect();
         format!("{}-{}-{}", s1, s2, s3)
       }
-
       let combined = format!("{}+{}", smiles_a, smiles_b);
       Ok(Molecule { inchikey: mock_inchikey(&combined),
                     inchi: format!("InChI=MOCK/FUSED/{}-{}", smiles_a, smiles_b),
@@ -188,11 +168,9 @@ impl ChemEngineInterface for ChemEngine {
                                                       substitution_points: vec![0, 1] }) })
     }
   }
-
   fn substitution_points(&self, mol: &Molecule) -> Vec<usize> {
     mol.structure.as_ref().map(|s| s.substitution_points.clone()).unwrap_or_default()
   }
-
   /// Heurística simple de factibilidad de enlace: ambos átomos deben tener
   /// al menos 1 hidrógeno disponible (total_h > 0) antes de la unión y el
   /// orden de enlace debe ser 1..=3.
@@ -214,11 +192,9 @@ impl ChemEngineInterface for ChemEngine {
     a.total_h > 0 && b.total_h > 0
   }
 }
-
 #[cfg(test)]
 mod tests {
   use super::*;
-
   #[test]
   fn test_molecule_export() {
     let m = Molecule { smiles: "".to_string(),
@@ -231,7 +207,6 @@ mod tests {
     assert_eq!(m.smiles, "");
     assert_eq!(m.num_atoms, 0);
   }
-
   #[test]
   #[cfg(not(feature = "python"))]
   fn test_mock_molecule_creation() {
@@ -243,7 +218,6 @@ mod tests {
     assert_eq!(molecule.inchikey.chars().filter(|c| *c == '-').count(), 2);
     assert!(molecule.inchi.starts_with("InChI=MOCK/"));
   }
-
   #[test]
   #[cfg(not(feature = "python"))]
   fn test_mock_molecule_fuse() {

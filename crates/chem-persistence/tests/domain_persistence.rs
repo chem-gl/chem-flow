@@ -1,5 +1,4 @@
 #![cfg(all(feature = "sqlite", not(feature = "postgres")))]
-
 use chem_domain::{DomainError, FamilyRepository, Molecule, MoleculeFamily, MoleculeWriter};
 use chem_persistence::test_helpers::create_temp_sqlite_db;
 use chem_persistence::DieselDomainRepository;

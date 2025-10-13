@@ -11,14 +11,12 @@ struct FlowRepoTestContext {
   snapshot_dir: PathBuf,
   artifact_dir: PathBuf,
 }
-
 impl Drop for FlowRepoTestContext {
   fn drop(&mut self) {
     let _ = std::fs::remove_dir_all(&self.snapshot_dir);
     let _ = std::fs::remove_dir_all(&self.artifact_dir);
   }
 }
-
 fn setup_repo() -> (DieselFlowRepository, FlowRepoTestContext) {
   let db = create_temp_sqlite_db().expect("failed to create sqlite db");
   let snapshot_dir = std::env::temp_dir().join(format!("chemflow_snapshots_{}", Uuid::new_v4()));
@@ -128,7 +126,6 @@ fn child_preserves_steps_after_parent_deletion_sqlite() {
   let items = repo.read_data(&child, 0).expect("read child");
   assert_eq!(items[0].metadata["m"].as_i64().unwrap(), 1);
 }
-
 #[test]
 fn delete_from_step_cascades_children_and_truncates_parent_sqlite() {
   let (repo, _ctx) = setup_repo();

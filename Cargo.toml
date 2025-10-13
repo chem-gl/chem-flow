@@ -25,7 +25,6 @@ chem-providers = { path = "crates/chem-providers" }
 chem-workflow = { path = "crates/chem-workflow" }
 chem-utils = { path = "crates/chem-utils" }
 postgres = "0.19"
-
 [dev-dependencies]
 tokio-test = "0.4"
 cargo-tarpaulin = "0.32"
@@ -33,7 +32,6 @@ grcov = "0.10"
 [[bin]]
 name = "main-core"
 path = "src/main.rs"
-
 [workspace]
 members = [
   "crates/chem-domain",
@@ -48,7 +46,6 @@ pyo3 = { git = "https://github.com/PyO3/pyo3", tag = "v0.26.0" }
 [[example]]
 name = "example-domain"
 required-features = ["integration_examples"]
-
 [features]
 # Por defecto no activamos Postgres para que los tests usen SQLite o in-memory
 default = []

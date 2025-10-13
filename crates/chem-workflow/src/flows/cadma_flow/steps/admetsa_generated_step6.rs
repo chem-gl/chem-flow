@@ -2,7 +2,6 @@
 //! Step5.
 //! - Similar a Step4 pero la fuente de moléculas es el payload de Step5.
 //! - Reutiliza la configuración (y posibilidad de valores manuales) de Step2.
-
 use crate::errors::WorkflowError;
 use crate::flows::cadma_flow::steps::admetsa_properties_step2::Step2Input;
 use crate::flows::cadma_flow::steps::common::{ADMETSAMethod, ADMETSAProperty, ManualValues, REQUIRED_PROPERTIES};
@@ -12,7 +11,6 @@ use crate::step::StepContext;
 use chem_domain::{Molecule, OwnedMolecularProperty};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step6Input {
   /// Override opcional de métodos preferidos (solo si Step2 usó Manual)
@@ -21,12 +19,10 @@ pub struct Step6Input {
   /// usó Manual
   pub manual_values: Option<ManualValues>,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step6Params {
   pub input: Step6Input,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step6Payload {
   pub generated_for: Vec<String>, // inchikeys origen
@@ -34,17 +30,14 @@ pub struct Step6Payload {
   pub calculated_properties: usize,
   pub step_result: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step6Metadata {
   pub status: String,
   pub parameters: Step6Params,
   pub domain_refs: Vec<String>,
 }
-
 #[derive(Debug, Default, Clone)]
 pub struct ADMETSAGeneratedStep6;
-
 impl ADMETSAGeneratedStep6 {
   fn step2_allowed_manual(&self, ctx: &StepContext) -> Result<(bool, Step2Input), WorkflowError> {
     // Buscar metadata de Step2 (similar a Step4)
@@ -61,12 +54,10 @@ impl ADMETSAGeneratedStep6 {
     }
     Err(WorkflowError::Validation("No se encontró Step2 para recuperar métodos".into()))
   }
-
   fn manual_value_for(&self, smiles: &str, prop: ADMETSAProperty, input: &Step6Input) -> Option<f64> {
     let prop_key = format!("{:?}", prop);
     input.manual_values.as_ref().and_then(|mv| mv.get(smiles)).and_then(|pv| pv.get(&prop_key).copied())
   }
-
   fn choose_method_for_property(&self,
                                 prop: ADMETSAProperty,
                                 base_input: &Step2Input,
@@ -84,7 +75,6 @@ impl ADMETSAGeneratedStep6 {
     }
     base_input.preferred_methods.iter().copied().find(|m| m.can_generate(prop)).unwrap_or(ADMETSAMethod::Manual)
   }
-
   fn compute_for_molecule(&self,
                           molecule: &Molecule,
                           base_input: &Step2Input,
@@ -137,14 +127,11 @@ impl ADMETSAGeneratedStep6 {
     }
     Ok(props)
   }
-
   pub fn execute_step(&self, ctx: &StepContext, input: Step6Input) -> Result<crate::step::StepInfo, WorkflowError> {
     // Recuperar payload de Step5
     let step5_payload: Option<Step5Payload> = ctx.get_step_payload_by_name_typed("SubstituteGenerationStep5")?;
     let step5_payload = step5_payload.ok_or_else(|| WorkflowError::Validation("Falta resultado de Step5".into()))?;
-
     let (allow_manual, base_input) = self.step2_allowed_manual(ctx)?;
-
     let mut generated_for: Vec<String> = Vec::new();
     let mut saved_ids: Vec<String> = Vec::new();
     for ik in step5_payload.generated_molecules.iter() {
@@ -167,7 +154,6 @@ impl ADMETSAGeneratedStep6 {
     Ok(crate::step::StepInfo { payload: serde_json::to_value(payload)?, metadata: serde_json::to_value(metadata)? })
   }
 }
-
 impl_workflow_step!(ADMETSAGeneratedStep6,
                     Step6Payload,
                     Step6Metadata,

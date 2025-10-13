@@ -10,28 +10,24 @@ use chem_persistence::{new_domain_from_env, new_flow_from_env};
 use chem_providers::{ChemEngine, ChemEngineInterface};
 use chem_workflow::flows::cadma_flow::steps::admetsa_generated_step6::Step6Input;
 use chem_workflow::flows::cadma_flow::steps::admetsa_initial_step4::{Step4Input, Step4Payload};
-use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Input;
-
 use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::Step2Input;
 use chem_workflow::flows::cadma_flow::steps::common::{
   ADMETSAMethod, ManualValues, PropertyValues, ALL_METHODS, REQUIRED_PROPERTIES,
 };
 use chem_workflow::flows::cadma_flow::steps::family_reference_step1::{Step1Input, Step1Payload};
 use chem_workflow::flows::cadma_flow::steps::molecule_initial_step3::{GenerationMethod, Step3Input};
+use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Input;
 use chem_workflow::{factory::ChemicalWorkflowFactory, flows::cadma_flow::CadmaFlow, ChemicalFlowEngine};
 use flow::repository::FlowRepository;
 use serde_json::json;
 use std::error::Error;
 use std::io::{self, Write};
-
 use std::sync::Arc;
 use uuid::Uuid;
-
 // Helper para crear moléculas desde SMILES usando el provider
 fn molecule_from_smiles(smiles: &str) -> Result<Molecule, Box<dyn Error>> {
   let engine = ChemEngine::init()?;
   let provider_mol = engine.get_molecule(smiles)?;
-
   // Convertir chem_providers::Molecule a ProviderMolecule
   let converted = ProviderMolecule { inchikey: provider_mol.inchikey,
                                      inchi: provider_mol.inchi,
@@ -40,10 +36,8 @@ fn molecule_from_smiles(smiles: &str) -> Result<Molecule, Box<dyn Error>> {
                                      mol_weight: provider_mol.mol_weight,
                                      mol_formula: provider_mol.mol_formula,
                                      structure: None /* Por ahora sin estructura detallada */ };
-
   Ok(Molecule::from_provider_molecule(smiles, converted)?)
 }
-
 fn prompt(msg: &str) -> Result<String, Box<dyn Error>> {
   print!("{}", msg);
   io::stdout().flush()?;
@@ -51,7 +45,6 @@ fn prompt(msg: &str) -> Result<String, Box<dyn Error>> {
   io::stdin().read_line(&mut s)?;
   Ok(s.trim_end().to_string())
 }
-
 fn parse_manual_values(input: &str) -> Result<PropertyValues, String> {
   let mut map = PropertyValues::new();
   for part in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -65,11 +58,9 @@ fn parse_manual_values(input: &str) -> Result<PropertyValues, String> {
   }
   Ok(map)
 }
-
 fn get_flow_name(repo: &dyn FlowRepository, id: &Uuid) -> String {
   repo.get_flow_meta(id).ok().and_then(|m| m.name).unwrap_or_else(|| "sin nombre".to_string())
 }
-
 // Selección simple de flow desde el repo
 fn select_flow_from_repo(repo: &dyn FlowRepository) -> Result<Option<Uuid>, Box<dyn Error>> {
   let ids = repo.list_flow_ids()?;
@@ -91,7 +82,6 @@ fn select_flow_from_repo(repo: &dyn FlowRepository) -> Result<Option<Uuid>, Box<
   }
   Ok(Some(ids[idx]))
 }
-
 /// Crea un flow nuevo (persistido por factory) y devuelve la instancia cargada.
 fn create_flow_interactive() -> Result<CadmaFlow, Box<dyn Error>> {
   let name = prompt("Nombre del flow (enter = cadma-demo): ")?;
@@ -102,7 +92,6 @@ fn create_flow_interactive() -> Result<CadmaFlow, Box<dyn Error>> {
   // Unbox para devolver la instancia concreta
   Ok(*engine_box)
 }
-
 /// Muestra metadatos y flow_meta básicos
 fn show_metadata(engine: &CadmaFlow) {
   match engine.get_metadata("flow_metadata") {
@@ -114,14 +103,12 @@ fn show_metadata(engine: &CadmaFlow) {
            engine.current_step(),
            engine.status());
 }
-
 /// Ejecuta interactivamente Step1 (FamilyReferenceStep1)
 fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("\n== Step1: Familias ==");
   // Mostrar familias existentes en domain repo
   let domain = engine.domain_repo();
   let families = domain.list_families().unwrap_or_default();
-
   // Caso 1: no hay familias -> crear nueva con SMILES
   if families.is_empty() {
     println!("No existen familias en el dominio. Crear nueva familia con SMILES.");
@@ -153,7 +140,6 @@ fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     println!("Step1 ejecutado y persistido.");
     return Ok(());
   }
-
   // Si hay familias, preguntar si crear nueva o seleccionar existente
   println!("Familias encontradas:");
   for (i, f) in families.iter().enumerate() {
@@ -192,7 +178,6 @@ fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     println!("Nueva familia creada y Step1 persistido.");
     return Ok(());
   }
-
   // seleccionar existente
   if let Ok(n) = choice.trim().parse::<usize>() {
     if n >= 1 && n <= families.len() {
@@ -218,7 +203,6 @@ fn run_step1(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 /// Ejecuta interactivamente Step2 (ADMETSA)
 fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("\n== Step2: ADMETSA ==");
@@ -230,7 +214,6 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
       REQUIRED_PROPERTIES.iter().filter_map(|&p| if m.can_generate(p) { Some(format!("{:?}", p)) } else { None }).collect();
     println!(" - {:?} -> {}", m, props.join(", "));
   }
-
   // Pedimos orden preferente por nombre (coma separado) — la interfaz es
   // tolerante
   let raw = prompt("Métodos preferidos (coma separados, e.g. Random1,Random2) [enter = Random1,Random2]: ")?;
@@ -252,7 +235,6 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
        })
        .collect()
   };
-
   // Validación local rápida: preferred cover?
   for &prop in &REQUIRED_PROPERTIES {
     let ok = preferred.iter().any(|&m| m.can_generate(prop));
@@ -262,7 +244,6 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
       return Ok(());
     }
   }
-
   // evitar ejecutar si Step1 no existe
   // Comprobar que Step1 ya fue ejecutado: leemos el último payload para el
   // primer paso y lo deserializamos.
@@ -275,7 +256,6 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     println!("No se encontró resultado de Step1: ejecuta Step1 primero.");
     return Ok(());
   }
-
   // Si Manual está incluido, pedir valores manuales
   let mut manual_values: Option<ManualValues> = None;
   if preferred.contains(&ADMETSAMethod::Manual) {
@@ -322,7 +302,6 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     }
     manual_values = Some(mv);
   }
-
   // Construir input JSON y ejecutar el paso 1 (ADMETSA) sin depender del
   // `current_step` (modo interactivo). Usamos `step_name_by_index(1)` para
   // obtener el nombre correcto del paso y `execute_step_by_index_unchecked`
@@ -335,13 +314,11 @@ fn run_step2(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     println!("Step2 ya fue ejecutado previamente para este flow; omitiendo.");
     return Ok(());
   }
-
   let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
   engine.persist_step_result(&step_name, info, -1, None)?;
   println!("Step2 ejecutado y persistido.");
   Ok(())
 }
-
 /// Ejecuta interactivamente Step3 (Molecule Initial)
 fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("\n== Step3: Generación de Molécula Inicial ==");
@@ -367,7 +344,6 @@ fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
       return Ok(());
     }
   };
-
   let input = Step3Input { method };
   let json_input = serde_json::to_value(&input)?;
   let step_idx = 2;
@@ -376,17 +352,14 @@ fn run_step3(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     println!("Step3 ya fue ejecutado previamente para este flow; omitiendo.");
     return Ok(());
   }
-
   let info = engine.execute_step_by_index_unchecked(step_idx, &json_input)?;
   engine.persist_step_result(&step_name, info, -1, None)?;
   println!("Step3 ejecutado y persistido.");
   Ok(())
 }
-
 /// Ejecuta interactivamente Step4 (ADMETSA para molécula(s) inicial(es))
 fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("\n== Step4: ADMETSA para molécula inicial ==");
-
   // Validar que existan Step2 y Step3
   let step2_name = engine.step_name_by_index(1)?;
   let step3_name = engine.step_name_by_index(2)?;
@@ -404,7 +377,6 @@ fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
       return Ok(());
     }
   };
-
   // Determinar si Step2 usó método Manual en su configuración
   use chem_workflow::flows::cadma_flow::steps::admetsa_properties_step2::Step2Metadata;
   let step2_meta_key = format!("step_state:{}", step2_name);
@@ -426,7 +398,6 @@ fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
       break;
     }
   }
-
   let mut override_methods: Option<Vec<ADMETSAMethod>> = None;
   let mut manual_values: Option<ManualValues> = None;
   if step2_used_manual {
@@ -448,7 +419,6 @@ fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
         override_methods = Some(list);
       }
     }
-
     // Si incluyen Manual o si quiere cargar manuales explícitamente, pedir valores
     let wants_manual =
       override_methods.as_ref().map(|v| v.iter().any(|m| matches!(m, ADMETSAMethod::Manual))).unwrap_or(false);
@@ -492,7 +462,6 @@ fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   } else {
     println!("Step2 no usó Manual: Step4 reutilizará los métodos de Step2 (sin override).");
   }
-
   let input = Step4Input { override_methods, manual_values };
   let json_input = serde_json::to_value(&input)?;
   let step_idx = 3;
@@ -506,7 +475,6 @@ fn run_step4(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("Step4 ejecutado y persistido.");
   Ok(())
 }
-
 /// Crea una rama desde un cursor especificado por el usuario
 fn create_branch_from_engine(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
   let flow_repo = engine.flow_repo();
@@ -570,7 +538,6 @@ fn load_flow_interactive() -> Result<Option<CadmaFlow>, Box<dyn Error>> {
   }
   Ok(None)
 }
-
 /// Mostrar registros persistidos (flow_data) para el flow actual
 fn dump_flow_data(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
   let repo = engine.flow_repo();
@@ -581,7 +548,6 @@ fn dump_flow_data(engine: &CadmaFlow) -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn list_families() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
   let fams = repo.list_families()?;
@@ -594,7 +560,6 @@ fn list_families() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn list_flows() -> Result<(), Box<dyn Error>> {
   let repo = new_flow_from_env()?;
   let ids = repo.list_flow_ids()?;
@@ -604,12 +569,10 @@ fn list_flows() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 /// Ver una molécula y sus propiedades almacenadas
 fn view_molecule() -> Result<(), Box<dyn Error>> {
   let repo = new_domain_from_env()?;
   let input = prompt("InChIKey de la molécula (enter para listar): ")?;
-
   let inchikey = if input.trim().is_empty() {
     let mols = repo.list_molecules()?;
     if mols.is_empty() {
@@ -630,7 +593,6 @@ fn view_molecule() -> Result<(), Box<dyn Error>> {
   } else {
     input.trim().to_uppercase()
   };
-
   match repo.get_molecule(&inchikey) {
     Ok(Some(m)) => {
       println!("\n== Molécula ==");
@@ -639,7 +601,6 @@ fn view_molecule() -> Result<(), Box<dyn Error>> {
       println!("InChI:    {}", m.inchi());
       println!("Metadata: {}",
                serde_json::to_string_pretty(m.metadata()).unwrap_or_else(|_| "{}".to_string()));
-
       match repo.get_molecular_properties(m.inchikey()) {
         Ok(props) => {
           println!("\nPropiedades ({}):", props.len());
@@ -660,14 +621,12 @@ fn view_molecule() -> Result<(), Box<dyn Error>> {
   }
   Ok(())
 }
-
 fn save_snapshot(engine: &CadmaFlow) {
   match engine.save_snapshot() {
     Ok(_) => println!("Snapshot guardado (best-effort)."),
     Err(e) => println!("Error guardando snapshot: {}", e),
   }
 }
-
 /// Ejecuta interactivamente Step5 (Generación de sustituciones)
 fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   // Step5 interactive execution
@@ -682,7 +641,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     }
   };
   let step4_payload: Step4Payload = serde_json::from_value(step4_payload_val)?;
-
   // Seleccionar/crear familia de sustituyentes
   let domain = engine.domain_repo();
   let families = domain.list_families()?;
@@ -724,7 +682,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
     }
     families[idx].id()
   };
-
   // Parámetros base
   let r_sub = prompt("Máximo número de sustituyentes a insertar (r_substitutes, entero >0): ")?;
   let r_substitutes: usize = r_sub.trim().parse().unwrap_or(1);
@@ -734,7 +691,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   let repeat = matches!(repeat_ans.trim().to_lowercase().as_str(), "y" | "s" | "si" | "yes");
   let save_ans = prompt("Guardar moléculas generadas en dominio? [Y/n]: ")?;
   let save_generated = !matches!(save_ans.trim().to_lowercase().as_str(), "n" | "no");
-
   // Overrides de puntos de unión principal
   println!("Puedes especificar puntos de sustitución (índices de átomos) para las moléculas principales.");
   println!("Deja vacío para usar los detectados automáticamente por RDKit (átomos con hidrógenos disponibles).");
@@ -754,7 +710,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   if principal_join_points.is_empty() {
     println!("Usando puntos automáticos RDKit para principales.");
   }
-
   // Overrides de puntos de unión para substituyentes (sobre InChIKey)
   println!("Overrides de puntos para sustituyentes (por InChIKey). Deja vacío para usar automáticos.");
   let sub_family = domain.get_family(&substituent_family_id)?.ok_or("Familia no encontrada tras crearla")?;
@@ -773,7 +728,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   if substitute_family_join_points.is_empty() {
     println!("Usando puntos automáticos RDKit para sustituyentes.");
   }
-
   let input =
     Step5Input { substitute_family_id: Some(substituent_family_id),
                  principal_join_points: if principal_join_points.is_empty() { None } else { Some(principal_join_points) },
@@ -788,7 +742,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
                  save_generated,
                  include_principal: true,
                  permutation_limit: 0 };
-
   let step_idx = 4; // Step5 index
   let step_name = engine.step_name_by_index(step_idx)?;
   if let Ok(Some(_)) = engine.get_last_step_payload(&step_name) {
@@ -804,7 +757,6 @@ fn run_step5(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("Step5 ejecutado y persistido.");
   Ok(())
 }
-
 /// Ejecuta interactivamente Step6 (ADMETSA sobre moléculas generadas en Step5)
 fn run_step6(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   use chem_workflow::flows::cadma_flow::steps::substitute_generation_step5::Step5Payload;
@@ -878,7 +830,6 @@ fn run_step6(engine: &mut CadmaFlow) -> Result<(), Box<dyn Error>> {
   println!("Step6 ejecutado y persistido.");
   Ok(())
 }
-
 fn main() -> Result<(), Box<dyn Error>> {
   println!("🚀 CadmaFlow Interactive Demo (mejorado)");
   // Inicializar repositorio (verificamos configuración)
@@ -889,10 +840,8 @@ fn main() -> Result<(), Box<dyn Error>> {
       return Err(Box::new(e));
     }
   };
-
   // Estado del engine en memoria (podemos crear o cargar)
   let mut maybe_engine: Option<CadmaFlow> = None;
-
   loop {
     println!("\n== Menú principal ==");
     println!("1) Crear flow nuevo");
@@ -913,7 +862,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("16) Listar todos los flujos");
     println!("0) Guardar snapshot");
     println!("q) Salir");
-
     let opt = prompt("Opción: ")?;
     match opt.as_str() {
       "1" => match create_flow_interactive() {
@@ -1092,6 +1040,5 @@ fn main() -> Result<(), Box<dyn Error>> {
       other => println!("Opción no válida: {}", other),
     }
   }
-
   Ok(())
 }

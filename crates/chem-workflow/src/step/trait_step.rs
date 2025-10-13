@@ -5,7 +5,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::sync::Arc;
-
 /// Resultado de ejecutar un paso. Contiene datos para persistir en `FlowData` o
 /// tablas de dominio.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,40 +12,31 @@ pub struct StepInfo {
   pub payload: JsonValue,
   pub metadata: JsonValue,
 }
-
 pub type StepResult = Result<StepInfo, WorkflowError>;
-
 /// Trait principal para pasos de workflow con tipos fuertemente tipados
 pub trait WorkflowStep: Send + Sync {
   type Payload: Serialize + DeserializeOwned + Send + Sync + 'static;
   type Metadata: Serialize + DeserializeOwned + Send + Sync + 'static;
   type Input: DeserializeOwned + Send + Sync + 'static;
-
   fn name(&self) -> &'static str;
-
   fn execute_typed(&self, ctx: &StepContext, input: Self::Input) -> StepResult;
-
   /// Inicialización opcional donde el paso puede recibir el repositorio de
   /// dominio (por ejemplo para mantenerlo en un campo interno). Por defecto
   /// es no-op; pasos que necesiten el repo pueden sobreescribir este método.
   fn init(&mut self, _domain_repo: Arc<dyn AllDomainPorts>) {}
-
   // Métodos de utilidad para conversión tipada
   fn into_stepinfo(payload: &Self::Payload, metadata: &Self::Metadata) -> Result<StepInfo, WorkflowError> {
     Ok(StepInfo { payload: serde_json::to_value(payload)?, metadata: serde_json::to_value(metadata)? })
   }
-
   fn recover_payload(info: &StepInfo) -> Result<Self::Payload, WorkflowError> {
     serde_json::from_value(info.payload.clone()).map_err(Into::into)
   }
-
   // Implementación por defecto para compatibilidad con JSON
   fn execute(&self, ctx: &StepContext, input: &JsonValue) -> StepResult {
     let parsed: Self::Input = serde_json::from_value(input.clone())?;
     self.execute_typed(ctx, parsed)
   }
 }
-
 /// Trait object-safe para dispatch dinámico en runtime
 pub trait WorkflowStepDyn: Send + Sync {
   fn name(&self) -> &'static str;
@@ -56,25 +46,21 @@ pub trait WorkflowStepDyn: Send + Sync {
   /// concretas pueden almacenar el repo si lo necesitan.
   fn init(&mut self, _domain_repo: Arc<dyn AllDomainPorts>);
 }
-
 // Implementación automática del trait dinámico para todos los WorkflowStep
 impl<T> WorkflowStepDyn for T where T: WorkflowStep
 {
   fn name(&self) -> &'static str {
     WorkflowStep::name(self)
   }
-
   fn execute(&self, ctx: &StepContext, input: &JsonValue) -> StepResult {
     WorkflowStep::execute(self, ctx, input)
   }
-
   fn init(&mut self, domain_repo: Arc<dyn AllDomainPorts>) {
     // Delegate to the typed trait default/override so concrete steps can
     // implement `init` on the `WorkflowStep` trait and receive the repo.
     WorkflowStep::init(self, domain_repo)
   }
 }
-
 // Macro helper para reducir boilerplate al definir pasos simples
 #[macro_export]
 macro_rules! impl_workflow_step {
@@ -84,17 +70,14 @@ macro_rules! impl_workflow_step {
       type Payload = $payload;
       type Metadata = $metadata;
       type Input = $input;
-
       fn name(&self) -> &'static str {
         ::std::any::type_name::<Self>().rsplit("::").next().unwrap_or(stringify!($step_ty))
       }
-
       fn execute_typed(&self, ctx: &$crate::step::StepContext, input: Self::Input) -> $crate::step::StepResult {
         self.run_typed(ctx, input)
       }
     }
   };
-
   // Variante con implementación inline del método run_typed (con self, ctx, input)
   ($step_ty:ty, $payload:ty, $metadata:ty, $input:ty, |$self_ident:ident, $ctx_ident:ident, $input_ident:ident| $body:block) => {
     impl $step_ty {
@@ -105,7 +88,6 @@ macro_rules! impl_workflow_step {
     }
     $crate::impl_workflow_step!($step_ty, $payload, $metadata, $input);
   };
-
   // Variante con implementación inline del método run_typed (solo ctx, input)
   ($step_ty:ty, $payload:ty, $metadata:ty, $input:ty, |$ctx_ident:ident, $input_ident:ident| $body:block) => {
     impl $step_ty {

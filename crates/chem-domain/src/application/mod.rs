@@ -10,9 +10,7 @@
 //! - Validación de entrada en el boundary
 //! - Manejo exhaustivo de errores
 //! - Sin dependencias de infraestructura
-
 pub mod use_cases;
-
 pub use use_cases::{
   AddMoleculeToFamilyUseCase, CreateFamilyUseCase, CreateMoleculeUseCase, DeleteFamilyUseCase, DeleteMoleculeUseCase,
   GetFamilyPropertiesUseCase, GetFamilyUseCase, GetMolecularPropertiesUseCase, GetMoleculeUseCase, ListFamiliesUseCase,

@@ -32,7 +32,6 @@ struct FlowTestGuard {
   snapshot_dir: std::path::PathBuf,
   artifact_dir: std::path::PathBuf,
 }
-
 #[cfg(all(test, feature = "sqlite", not(feature = "postgres")))]
 impl Drop for FlowTestGuard {
   fn drop(&mut self) {
@@ -79,27 +78,22 @@ struct SnapshotRow {
   metadata: String,
   created_at_ts: i64,
 }
-
 impl DieselFlowRepository {
   fn default_snapshot_dir() -> String {
     std::env::var("SNAPSHOT_DIR").unwrap_or_else(|_| "./snapshots".to_string())
   }
-
   fn default_artifact_dir() -> String {
     std::env::var("ARTIFACT_DIR").unwrap_or_else(|_| "./artifacts".to_string())
   }
-
   pub fn new_with_pool(pool: DbPool) -> FlowResult<Self> {
     Self::with_pool_and_dirs(pool, Self::default_snapshot_dir(), Self::default_artifact_dir())
   }
-
   pub fn with_pool_and_dirs(pool: DbPool, snapshot_dir: String, artifact_dir: String) -> FlowResult<Self> {
     fs::create_dir_all(&snapshot_dir).map_err(|e| FlowError::Storage(format!("snapshot dir: {}", e)))?;
     fs::create_dir_all(&artifact_dir).map_err(|e| FlowError::Storage(format!("artifact dir: {}", e)))?;
     run_migrations_on_pool(&pool).map_err(|e| FlowError::Storage(format!("migrations: {}", e)))?;
     Ok(DieselFlowRepository { pool: Arc::new(pool), snapshot_dir, artifact_dir })
   }
-
   pub fn pool(&self) -> Arc<DbPool> {
     Arc::clone(&self.pool)
   }
@@ -111,7 +105,6 @@ impl DieselFlowRepository {
     let pool = Pool::builder().max_size(1).build(manager).expect("no se pudo crear el pool de conexiones");
     DieselFlowRepository::new_with_pool(pool)
   }
-
   pub fn new(database_url: &str) -> Self {
     DieselFlowRepository::try_new(database_url).expect("failed to initialize DieselFlowRepository")
   }
@@ -149,9 +142,7 @@ pub fn new_from_env() -> FlowResult<DieselFlowRepository> {
   use crate::test_helpers::create_temp_sqlite_db;
   use once_cell::sync::Lazy;
   use std::sync::Mutex;
-
   static FLOW_GUARDS: Lazy<Mutex<Vec<FlowTestGuard>>> = Lazy::new(|| Mutex::new(Vec::new()));
-
   let db = create_temp_sqlite_db().map_err(|e| FlowError::Other(format!("sqlite helper: {}", e)))?;
   let snapshot_dir = std::env::temp_dir().join(format!("chemflow_snapshots_{}", Uuid::new_v4()));
   let artifact_dir = std::env::temp_dir().join(format!("chemflow_artifacts_{}", Uuid::new_v4()));

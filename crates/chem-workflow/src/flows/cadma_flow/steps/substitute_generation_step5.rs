@@ -7,7 +7,6 @@ use chem_providers::{ChemEngine, ChemEngineInterface};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
-
 /// Input para Step5: generación de permutaciones con sustituyentes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step5Input {
@@ -27,16 +26,13 @@ pub struct Step5Input {
   #[serde(default)]
   pub permutation_limit: usize,
 }
-
 fn default_true() -> bool {
   true
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step5Params {
   pub input: Step5Input,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step5Payload {
   pub generated_for: Vec<String>,
@@ -44,7 +40,6 @@ pub struct Step5Payload {
   pub generated_count: usize,
   pub step_result: String,
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step5Metadata {
   pub status: String,
@@ -52,10 +47,8 @@ pub struct Step5Metadata {
   pub domain_refs: Vec<String>,
   pub warnings: Vec<String>,
 }
-
 #[derive(Debug, Default, Clone)]
 pub struct SubstituteGenerationStep5;
-
 impl SubstituteGenerationStep5 {
   fn load_substitute_family(&self, ctx: &StepContext, fid: Uuid) -> Result<MoleculeFamily, WorkflowError> {
     let fam =
@@ -64,7 +57,6 @@ impl SubstituteGenerationStep5 {
          .ok_or_else(|| WorkflowError::Validation(format!("Familia sustituyentes {} no encontrada", fid)))?;
     Ok(fam)
   }
-
   fn validate_input(&self, input: &Step5Input) -> Result<(), WorkflowError> {
     if input.r_substitutes == 0 {
       return Err(WorkflowError::Validation("r_substitutes debe ser > 0".into()));
@@ -77,26 +69,20 @@ impl SubstituteGenerationStep5 {
     }
     Ok(())
   }
-
   pub fn execute_step(&self, ctx: &StepContext, input: Step5Input) -> Result<crate::step::StepInfo, WorkflowError> {
     self.validate_input(&input)?;
-
     // Obtener payload de Step4 (moléculas generadas)
     let step4: Option<crate::flows::cadma_flow::steps::admetsa_initial_step4::Step4Payload> =
       ctx.get_step_payload_by_name_typed("ADMETSAInitialStep4")?;
     let step4 = step4.ok_or_else(|| WorkflowError::Validation("Falta resultado de Step4".into()))?;
-
     let substitute_family = self.load_substitute_family(ctx, input.substitute_family_id.unwrap())?;
-
     let mut warnings: Vec<String> = Vec::new();
     let mut generated_for: Vec<String> = Vec::new();
     let mut generated_molecules: Vec<String> = Vec::new();
     let mut seen_inchikeys: HashSet<String> = HashSet::new();
     let mut explored: usize = 0;
-
     // Inicializar motor químico (RDKit)
     let engine = ChemEngine::init().map_err(|e| WorkflowError::Other(format!("Error inicializando engine: {}", e)))?;
-
     // Precomputar substituyentes: (mol, join_points)
     let sub_join_override = input.substitute_family_join_points.clone().unwrap_or_default();
     let mut substituents: Vec<(Molecule, Vec<usize>)> = Vec::new();
@@ -120,7 +106,6 @@ impl SubstituteGenerationStep5 {
     if substituents.is_empty() {
       return Err(WorkflowError::Validation("No hay sustituyentes válidos tras validación RDKit".into()));
     }
-
     // Iterar moléculas objetivo
     let principal_override = input.principal_join_points.clone().unwrap_or_default();
     for ik in step4.generated_for.iter() {
@@ -153,7 +138,6 @@ impl SubstituteGenerationStep5 {
                               principal_points.len()));
       }
       let effective_r_max = if !input.repeat && r_max > principal_points.len() { principal_points.len() } else { r_max };
-
       if input.include_principal && input.save_generated && !seen_inchikeys.contains(ik) {
         seen_inchikeys.insert(ik.clone());
         generated_molecules.push(ik.clone());
@@ -291,7 +275,6 @@ impl SubstituteGenerationStep5 {
         }
       } // fin loop k
     }
-
     let payload = Step5Payload { generated_for: generated_for.clone(),
                                  generated_molecules: generated_molecules.clone(),
                                  generated_count: generated_molecules.len(),
@@ -301,7 +284,6 @@ impl SubstituteGenerationStep5 {
     Ok(crate::step::StepInfo { payload: serde_json::to_value(payload)?, metadata: serde_json::to_value(metadata)? })
   }
 }
-
 /// Genera TODAS las secuencias (permuta / variaciones) de longitud r a partir
 /// de los puntos principales. Si repeat=false no permite reutilizar un mismo
 /// punto; si repeat=true permite repeticiones (variaciones con repetición).
@@ -331,7 +313,6 @@ fn principal_sequences(points: &Vec<usize>, r: usize, repeat: bool) -> Vec<Vec<u
   backtrack(points, r, repeat, &mut current, &mut out);
   out
 }
-
 /// Genera TODAS las secuencias de sustituyentes de longitud r. Si repeat=false
 /// equivale a permutaciones sin repetición; si repeat=true, variaciones con
 /// repetición.
@@ -372,7 +353,6 @@ fn substituent_sequences(subs: &Vec<(Molecule, Vec<usize>)>, r: usize, repeat: b
   backtrack(subs, r, repeat, &mut Vec::new(), &mut current, &mut out);
   out
 }
-
 /// Producto cartesiano de un slice de vectores de índices.
 fn cartesian_product(sets: &Vec<&Vec<usize>>) -> Vec<Vec<usize>> {
   let mut result: Vec<Vec<usize>> = vec![Vec::new()];
@@ -389,7 +369,6 @@ fn cartesian_product(sets: &Vec<&Vec<usize>>) -> Vec<Vec<usize>> {
   }
   result
 }
-
 impl_workflow_step!(SubstituteGenerationStep5,
                     Step5Payload,
                     Step5Metadata,
