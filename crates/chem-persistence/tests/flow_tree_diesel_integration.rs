@@ -415,7 +415,7 @@ fn test_diesel_rehydration_scenario() {
 
     // Replay desde ese snapshot hasta el final
     let branch_replay = repo.read_data(&branch_id, snap.cursor).expect("branch replay");
-    assert!(branch_replay.len() > 0);
+    assert!(!branch_replay.is_empty());
   } else {
     // Si no hay snapshot, replay desde 0
     let all_steps = repo.read_data(&branch_id, 0).expect("all steps");

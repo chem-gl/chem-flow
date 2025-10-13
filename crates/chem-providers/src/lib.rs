@@ -95,7 +95,7 @@ impl ChemEngineInterface for ChemEngine {
         let target_len = 25; // 14 + 10 + 1
         for i in 0..target_len {
           let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(11) };
-          let v = (b % 36) as u8;
+          let v = b % 36;
           let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
           out.push(ch);
         }
@@ -154,7 +154,7 @@ impl ChemEngineInterface for ChemEngine {
         let target_len = 25; // 14 + 10 + 1
         for i in 0..target_len {
           let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(7) };
-          let v = (b % 36) as u8;
+          let v = b % 36;
           let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
           out.push(ch);
         }

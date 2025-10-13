@@ -48,20 +48,20 @@ fn print_tree(repo: &dyn FlowRepository, flow_id: &Uuid, indent: usize) {
 
   // Mostrar primeros y últimos 3 pasos
   let show_count = 3.min(data.len());
-  for i in 0..show_count {
+  for item in data.iter().take(show_count) {
     println!("{}  └─ Paso {}: {}",
              indent_str,
-             data[i].cursor,
-             data[i].payload["content"].as_str().unwrap_or("???"));
+             item.cursor,
+             item.payload["content"].as_str().unwrap_or("???"));
   }
 
   if data.len() > show_count * 2 {
     println!("{}  └─ ... ({} pasos más)", indent_str, data.len() - show_count * 2);
-    for i in (data.len() - show_count)..data.len() {
+    for item in data.iter().skip(data.len() - show_count) {
       println!("{}  └─ Paso {}: {}",
                indent_str,
-               data[i].cursor,
-               data[i].payload["content"].as_str().unwrap_or("???"));
+               item.cursor,
+               item.payload["content"].as_str().unwrap_or("???"));
     }
   }
 
