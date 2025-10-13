@@ -1,0 +1,63 @@
+[package]
+name = "flow-api"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "flow-api"
+path = "src/main.rs"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# UUID
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+
+# Error handling
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+
+# Logging
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+
+# OpenAPI & Swagger
+utoipa = { version = "5.4", features = ["axum_extras", "uuid"] }
+utoipa-swagger-ui = { version = "8.0", features = ["axum"] }
+
+# Configuration
+dotenvy = "0.15.7"
+once_cell = "1.21.3"
+
+# Workspace crates
+chem-workflow = { path = "../chem-workflow" }
+chem-domain = { path = "../chem-domain" }
+# Do not force PG by default; allow selecting backend via features
+chem-persistence = { path = "../chem-persistence", optional = true }
+chem-providers = { path = "../chem-providers" }
+flow = { path = "../flow" }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+# Default to sqlite for local development and tests
+default = ["sqlite"]
+# Feature toggles that enable the corresponding feature in chem-persistence
+pg = ["chem-persistence/pg", "chem-persistence"]
+sqlite = ["chem-persistence/sqlite", "chem-persistence"]
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3.10"

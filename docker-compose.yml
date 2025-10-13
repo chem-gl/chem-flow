@@ -6,7 +6,7 @@ services:
       - .env
     environment:
       POSTGRES_USER: ${DATABASE_USER:-admin}
-      POSTGRES_PASSWORD: ${DATABASE_PASS:-admin123}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-admin123}
       POSTGRES_DB: ${DATABASE_NAME:-mydatabase}
     ports:
       - "5432:5432"
@@ -21,15 +21,14 @@ services:
       interval: 5s
       timeout: 2s
       retries: 10
+
+  # Servicio principal de la aplicación
   app:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         FEATURES: "pg_demo"
-    # Restart only on non-zero exits to avoid restart loops when the
-    # process exits successfully. Use `unless-stopped` for long-running
-    # production services that should restart after host reboot.
     restart: on-failure
     env_file:
       - .env
@@ -46,7 +45,38 @@ services:
     volumes:
       - ./crates/chem-providers/python:/app/python:ro
       - ./crates/chem-providers/requirements.txt:/app/requirements.txt:ro
-    # Production container should not bind-mount the whole workspace (keeps image reproducible)
+
+  # Servicio de la API RESTful CADMA
+  flow-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+      args:
+        FEATURES: "pg"
+    restart: on-failure
+    env_file:
+      - .env
+    environment:
+      PYO3_PYTHON: ${PYO3_PYTHON:-/opt/conda/bin/python}
+      PYTHON_SYS_EXECUTABLE: ${PYTHON_SYS_EXECUTABLE:-/opt/conda/bin/python}
+      LD_LIBRARY_PATH: ${LD_LIBRARY_PATH:-/opt/conda/lib}
+      DATABASE_URL: ${DATABASE_URL}
+      PORT: ${PORT:-3000}
+      HOST: "0.0.0.0"
+      RUST_LOG: ${RUST_LOG:-info,flow_api=debug}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"  # Puerto de la API CADMA
+    volumes:
+      - .:/workspace:delegated
+      - cargo_target:/workspace/target
+    working_dir: /workspace/crates/flow-api
+    command: ["cargo", "run", "--release", "--features", "pg"]
+
+  # Contenedor de desarrollo
   app-dev:
     build:
       context: .
@@ -70,7 +100,7 @@ services:
       - .:/workspace:delegated
       - cargo_target:/workspace/target
     command: ["/bin/bash", "-c", "while true; do sleep 86400; done"]
-    # use the base stage which contains rustup/cargo so you can run cargo test inside the container
+
 volumes:
   db_data:
   cargo_target:
