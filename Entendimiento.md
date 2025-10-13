@@ -34,7 +34,7 @@
 
 ## 📚 Orden de Lectura y Análisis
 
-### Fase 1: Configuración y Contexto (30 min)
+### Fase 1: Configuración y Contexto
 
 **Objetivo**: Comprender el ecosistema del proyecto
 
@@ -60,7 +60,7 @@
    - Evolución del diseño
    - Decisiones arquitectónicas
 
-### Fase 2: Core Domain (1-2 horas)
+### Fase 2: Core Domain
 
 **Objetivo**: Entender las entidades y reglas de negocio
 
@@ -97,7 +97,7 @@
     - Tipos de error del dominio
     - Manejo con thiserror
 
-### Fase 3: Ports & Adapters (1 hora)
+### Fase 3: Ports & Adapters
 
 **Objetivo**: Comprender las interfaces del sistema
 
@@ -120,7 +120,7 @@
     - Cálculo de propiedades
     - Persistencia de propiedades
 
-### Fase 4: Services (30 min)
+### Fase 4: Services
 
 **Objetivo**: Lógica de negocio
 
@@ -133,7 +133,7 @@
     - Use cases
     - Casos de uso de aplicación
 
-### Fase 5: Flow Engine (1 hora)
+### Fase 5: Flow Engine
 
 **Objetivo**: Sistema de versionado y flujos
 
@@ -163,7 +163,7 @@
     - Casos de uso reales
     - Ramificación y prunning
 
-### Fase 6: Persistencia (1 hora)
+### Fase 6: Persistencia
 
 **Objetivo**: Implementación de almacenamiento
 
@@ -196,7 +196,7 @@
     - Tests de integración
     - Validación de invariantes
 
-### Fase 7: Providers (45 min)
+### Fase 7: Providers
 
 **Objetivo**: Integración con sistemas externos
 
@@ -214,7 +214,7 @@
     - Binding Rust-Python
     - ChemEngine trait
 
-### Fase 8: Workflows (1-2 horas)
+### Fase 8: Workflows
 
 **Objetivo**: Flujos de trabajo químicos
 
@@ -241,7 +241,7 @@
     - Uso end-to-end
     - Menú interactivo
 
-### Fase 9: Testing & CI/CD (30 min)
+### Fase 9: Testing & CI/CD
 
 **Objetivo**: Estrategia de pruebas
 
@@ -255,7 +255,7 @@
     - Patrón Given-When-Then
     - Mocks vs integración
 
-### Fase 10: Entrada Principal (15 min)
+### Fase 10: Entrada Principal
 
 **Objetivo**: Punto de inicio de la aplicación
 
