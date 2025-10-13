@@ -5,6 +5,9 @@
 
 set -e
 
+# Ensure cargo binaries are on PATH so `diesel` installed below is immediately available
+export PATH="$HOME/.cargo/bin:$PATH"
+
 # Colores para output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -130,16 +133,26 @@ fi
 echo -e "${BLUE}💻 Ejecutando en modo local${NC}"
 
 # Verificar que existe la variable DATABASE_URL
+# Para despliegues por defecto usamos PostgreSQL apuntando al servicio `db`.
 if [ -z "$DATABASE_URL" ]; then
-    echo -e "${YELLOW}⚠️  DATABASE_URL no está configurado${NC}"
-    echo "Usando SQLite por defecto para desarrollo..."
-    export DATABASE_URL="sqlite://./flow_api.db"
+    echo -e "${YELLOW}⚠️  DATABASE_URL no está configurado. Usando PostgreSQL por defecto (servicio 'db').${NC}"
+    # String por defecto coherente con el .env que creamos más arriba
+    export DATABASE_URL="postgresql://admin:admin123@db:5432/flowchem"
 fi
 
 echo -e "${GREEN}📊 Base de datos:${NC} $DATABASE_URL"
 
 # Verificar si PostgreSQL está disponible (solo si se usa PostgreSQL)
 if [[ $DATABASE_URL == postgresql://* ]] || [[ $DATABASE_URL == postgres://* ]]; then
+    # If running locally (not in Docker mode) and DATABASE_URL points to the
+    # service name 'db', rewrite it to 'localhost' so the host process can
+    # connect to the Postgres container via the published port (5432).
+    if [ "$DOCKER_MODE" != true ] && echo "$DATABASE_URL" | grep -q '@db:'; then
+        echo -e "${YELLOW}⚠️ Ejecutando localmente pero DATABASE_URL apunta a 'db' — usando 'localhost' para conexiones locales.${NC}"
+        DATABASE_URL=$(echo "$DATABASE_URL" | sed 's/@db:/@localhost:/')
+        export DATABASE_URL
+        echo -e "${GREEN}📊 Base de datos actualizada a:${NC} $DATABASE_URL"
+    fi
     echo -e "${YELLOW}🔍 Verificando conexión a PostgreSQL...${NC}"
     
     # Extraer información de la URL
@@ -150,16 +163,84 @@ if [[ $DATABASE_URL == postgresql://* ]] || [[ $DATABASE_URL == postgres://* ]];
     # Verificar conectividad
     if command -v pg_isready &> /dev/null; then
         if ! pg_isready -h "$DB_HOST" -p "$DB_PORT" &> /dev/null; then
-            echo -e "${RED}❌ PostgreSQL no está disponible en $DB_HOST:$DB_PORT${NC}"
-            echo "Para usar PostgreSQL, ejecuta:"
-            echo "  docker-compose up -d db"
-            echo "O usa el modo Docker con: $0 --docker"
-            exit 1
+            # If pg isn't reachable, try to start db with docker-compose (if available)
+            # so local users don't have to run it manually.
+            if command -v docker-compose &> /dev/null || (command -v docker &> /dev/null && docker compose version >/dev/null 2>&1); then
+                # choose compose command
+                if command -v docker-compose &> /dev/null; then
+                    COMPOSE_CMD="docker-compose"
+                else
+                    COMPOSE_CMD="docker compose"
+                fi
+                echo -e "${YELLOW}⚠️ PostgreSQL no responde en $DB_HOST:$DB_PORT. Intentando levantar servicio 'db' con Docker Compose...${NC}"
+                $COMPOSE_CMD up -d db
+
+                # wait for container healthy (use docker inspect if possible)
+                DB_CONTAINER=$($COMPOSE_CMD ps -q db 2>/dev/null || true)
+                if [[ -n "$DB_CONTAINER" ]]; then
+                    echo "Esperando a que el contenedor db esté healthy..."
+                    for i in {1..60}; do
+                        STATUS=$(docker inspect --format='{{json .State.Health.Status}}' "$DB_CONTAINER" 2>/dev/null || echo "null")
+                        if [[ "$STATUS" == '"healthy"' ]]; then
+                            echo -e "${GREEN}✅ Postgres container is healthy${NC}"
+                            break
+                        fi
+                        if [[ $i -eq 60 ]]; then
+                            echo -e "${RED}❌ Timeout esperando el healthcheck del contenedor db${NC}"
+                            break
+                        fi
+                        sleep 2
+                    done
+                else
+                    # fallback: wait for pg_isready on localhost:5432
+                    echo "Esperando a que Postgres acepte conexiones en $DB_HOST:$DB_PORT..."
+                    for i in {1..60}; do
+                        if pg_isready -h "$DB_HOST" -p "$DB_PORT" &> /dev/null; then
+                            echo -e "${GREEN}✅ PostgreSQL está disponible${NC}"
+                            break
+                        fi
+                        sleep 1
+                    done
+                fi
+                # final check
+                if ! pg_isready -h "$DB_HOST" -p "$DB_PORT" &> /dev/null; then
+                    echo -e "${RED}❌ PostgreSQL no está disponible en $DB_HOST:$DB_PORT tras intentar levantarlo con Docker Compose${NC}"
+                    exit 1
+                fi
+            else
+                echo -e "${RED}❌ PostgreSQL no está disponible en $DB_HOST:$DB_PORT${NC}"
+                echo "Para usar PostgreSQL, ejecuta:"
+                echo "  docker-compose up -d db"
+                echo "O usa el modo Docker con: $0 --docker"
+                exit 1
+            fi
         else
             echo -e "${GREEN}✅ PostgreSQL está disponible${NC}"
         fi
     else
         echo -e "${YELLOW}⚠️  pg_isready no está instalado, omitiendo verificación${NC}"
+        # If pg_isready is missing, but docker-compose is available, try to bring up db so the user doesn't need to.
+        if command -v docker-compose &> /dev/null || (command -v docker &> /dev/null && docker compose version >/dev/null 2>&1); then
+            if command -v docker-compose &> /dev/null; then
+                COMPOSE_CMD="docker-compose"
+            else
+                COMPOSE_CMD="docker compose"
+            fi
+            echo -e "${YELLOW}ℹ️ pg_isready no está instalado: intentando levantar 'db' con Docker Compose para comodidad...${NC}"
+            $COMPOSE_CMD up -d db
+            DB_CONTAINER=$($COMPOSE_CMD ps -q db 2>/dev/null || true)
+            if [[ -n "$DB_CONTAINER" ]]; then
+                echo "Esperando a que el contenedor db esté healthy..."
+                for i in {1..60}; do
+                    STATUS=$(docker inspect --format='{{json .State.Health.Status}}' "$DB_CONTAINER" 2>/dev/null || echo "null")
+                    if [[ "$STATUS" == '"healthy"' ]]; then
+                        echo -e "${GREEN}✅ Postgres container is healthy${NC}"
+                        break
+                    fi
+                    sleep 2
+                done
+            fi
+        fi
     fi
 fi
 
@@ -182,7 +263,7 @@ if [[ $DATABASE_URL == sqlite://* ]]; then
     # Instalar diesel CLI si no está disponible
     if ! command -v diesel &> /dev/null; then
         echo "Instalando diesel CLI..."
-        cargo install diesel_cli --no-default-features --features sqlite
+        cargo install diesel_cli --no-default-features --features sqlite --force
     fi
     
     diesel migration run --database-url "$DATABASE_URL" --migration-dir crates/chem-persistence/migrations || true
@@ -190,9 +271,71 @@ elif [[ $DATABASE_URL == postgresql://* ]] || [[ $DATABASE_URL == postgres://* ]
     # Instalar diesel CLI si no está disponible
     if ! command -v diesel &> /dev/null; then
         echo "Instalando diesel CLI..."
-        cargo install diesel_cli --no-default-features --features postgres
+        cargo install diesel_cli --no-default-features --features postgres --force
     fi
-    
+
+    # Ensure the target database exists. Parse DATABASE_URL for connection parts.
+    proto_removed="${DATABASE_URL#*://}"
+    userpass="${proto_removed%%@*}"
+    DB_USER="${userpass%%:*}"
+    DB_PASS="${userpass#*:}"
+    hostportdb="${proto_removed#*@}"
+    hostport="${hostportdb%%/*}"
+    DB_HOST_PARSED="${hostport%%:*}"
+    DB_PORT_PARSED="${hostport#*:}"
+    DB_NAME_PARSED="${hostportdb#*/}"
+    DB_NAME_PARSED="${DB_NAME_PARSED%%\?*}"
+
+    # prefer docker-compose to create DB if available
+    if command -v docker-compose &> /dev/null || (command -v docker &> /dev/null && docker compose version >/dev/null 2>&1); then
+        if command -v docker-compose &> /dev/null; then
+            COMPOSE_CMD="docker-compose"
+        else
+            COMPOSE_CMD="docker compose"
+        fi
+        DB_CONTAINER=$($COMPOSE_CMD ps -q db 2>/dev/null || true)
+        if [[ -n "$DB_CONTAINER" ]]; then
+            echo "Comprobando si la base de datos '$DB_NAME_PARSED' existe dentro del contenedor db..."
+            EXISTS=$(docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME_PARSED'" 2>/dev/null || true)
+            if [[ "$EXISTS" != "1" ]]; then
+                echo "Base de datos '$DB_NAME_PARSED' no encontrada. Creando dentro del contenedor db..."
+                docker exec "$DB_CONTAINER" psql -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$DB_NAME_PARSED\";" || true
+            else
+                echo "Base de datos '$DB_NAME_PARSED' ya existe.";
+            fi
+        else
+            echo "No se detectó contenedor 'db' para creación automática. Intentando crear con psql local..."
+            if command -v psql &> /dev/null; then
+                export PGPASSWORD="$DB_PASS"
+                EXISTS=$(psql -h "$DB_HOST_PARSED" -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME_PARSED'" 2>/dev/null || true)
+                if [[ "$EXISTS" != "1" ]]; then
+                    echo "Base de datos '$DB_NAME_PARSED' no encontrada. Creando con psql local..."
+                    psql -h "$DB_HOST_PARSED" -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$DB_NAME_PARSED\";" || true
+                else
+                    echo "Base de datos '$DB_NAME_PARSED' ya existe.";
+                fi
+                unset PGPASSWORD
+            else
+                echo "No se detectó 'psql' local y no hay contenedor 'db' para crear la base de datos. Por favor crea la BD manualmente y luego reintenta."
+            fi
+        fi
+    else
+        # No docker-compose and no docker compose; fallback to local psql if available
+        if command -v psql &> /dev/null; then
+            export PGPASSWORD="$DB_PASS"
+            EXISTS=$(psql -h "$DB_HOST_PARSED" -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME_PARSED'" 2>/dev/null || true)
+            if [[ "$EXISTS" != "1" ]]; then
+                echo "Base de datos '$DB_NAME_PARSED' no encontrada. Creando con psql local..."
+                psql -h "$DB_HOST_PARSED" -U "$DB_USER" -d postgres -c "CREATE DATABASE \"$DB_NAME_PARSED\";" || true
+            else
+                echo "Base de datos '$DB_NAME_PARSED' ya existe.";
+            fi
+            unset PGPASSWORD
+        else
+            echo "No hay docker-compose ni psql disponible para crear la base de datos. Por favor crea '$DB_NAME_PARSED' manualmente y reintenta."
+        fi
+    fi
+
     diesel migration run --database-url "$DATABASE_URL" --migration-dir crates/chem-persistence/migrations || true
 fi
 
@@ -214,4 +357,17 @@ echo ""
 
 # Ejecutar la API
 cd crates/flow-api
-cargo run --release
+# If using Postgres, ensure the crate is built with the 'pg' feature so
+# chem-persistence is compiled with Postgres support.
+if [[ $DATABASE_URL == postgresql://* ]] || [[ $DATABASE_URL == postgres://* ]]; then
+    echo -e "${YELLOW}🔨 Compilando flow-api con soporte Postgres (feature 'pg')...${NC}"
+    cargo build --release --features pg || {
+        echo -e "${RED}❌ Falló la compilación con feature 'pg'. Intenta ejecutar:\n  cargo build --release --features pg${NC}";
+        exit 1
+    }
+    echo -e "${GREEN}✅ Compilación con 'pg' completa${NC}"
+    echo -e "${YELLOW}▶ Ejecutando flow-api (con 'pg')...${NC}"
+    cargo run --release --features pg
+else
+    cargo run --release
+fi

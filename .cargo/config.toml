@@ -1,0 +1,8 @@
+[net]
+git-fetch-with-cli = true
+
+[http]
+check-revoke = false
+
+[registries.crates-io]
+protocol = "sparse"
