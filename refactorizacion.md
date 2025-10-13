@@ -1209,23 +1209,350 @@ sudo cargo flamegraph --example cadma_example
 
 ## 📋 Checklist de Validación por Fase
 
-### Antes de cada commit:
+### ✅ Antes de cada commit:
 
-- [ ] `cargo fmt` ejecutado
-- [ ] `cargo clippy -- -D warnings` sin errores
-- [ ] Tests unitarios pasan: `cargo test -p <crate>`
-- [ ] Tests de integración pasan: `cargo test --workspace`
-- [ ] Coverage no disminuye: `./scripts/generate_coverage.sh`
-- [ ] Documentación actualizada
+- [ ] **Formato**: `cargo fmt --all` ejecutado (verifica que no hay cambios pendientes)
+- [ ] **Linting**: `cargo clippy --workspace --all-features -- -D warnings` sin errores
+- [ ] **Tests unitarios**: `cargo test -p <crate>` todos pasan
+- [ ] **Tests de integración**: `cargo test --workspace` todos pasan
+- [ ] **Coverage**: `./scripts/generate_coverage.sh` - verificar que no disminuye más del 2%
+- [ ] **Documentación**: Actualizar comentarios y rustdoc en código modificado
+- [ ] **Build**: `cargo build --workspace --all-features` compila sin warnings
+
+### 🔍 Revisiones Manuales Obligatorias por Fase
+
+#### Fase 1: Domain Layer - Checklist de Revisión Manual
+
+**1.1 Molecule.rs - Verificaciones**:
+- [ ] Abrir `crates/chem-domain/src/molecule.rs` y revisar:
+  - [ ] ¿El método `from_parts()` valida que inchikey no esté vacío? (línea ~85)
+  - [ ] ¿El método `verify_integrity()` usa el mismo algoritmo de hash que la creación? (línea ~200)
+  - [ ] ¿Todos los campos obligatorios tienen validación? (smiles, inchi, inchikey)
+  - [ ] ¿El struct tiene `#[derive(Debug, Clone, Serialize, Deserialize)]`? (línea ~10)
+- [ ] Ejecutar test específico: `cargo test -p chem-domain molecule::tests --nocapture`
+- [ ] **Verificación manual**: Crear molécula de test y verificar que el hash coincide:
+  ```bash
+  echo "CCO" | sha256sum  # Comparar con lo que genera el código
+  ```
+
+**1.2 MoleculeFamily.rs - Verificaciones**:
+- [ ] Abrir `crates/chem-domain/src/molecule_family.rs` y revisar:
+  - [ ] ¿El método `add_molecule()` verifica duplicados antes de agregar? (línea ~140)
+  - [ ] ¿El método recalcula el hash después de add/remove? (línea ~150, 180)
+  - [ ] ¿Se respeta el flag `frozen`? Buscar `if self.frozen` en el código
+  - [ ] ¿El constructor `new()` rechaza vectores vacíos? (línea ~60)
+- [ ] **Test manual en REPL**:
+  ```rust
+  // En un test o ejemplo:
+  let family = MoleculeFamily::new(vec![], json!({}));
+  // Debe retornar Err(DomainError::EmptyFamily)
+  ```
+
+**1.3 Properties - Verificaciones**:
+- [ ] Comparar `molecular_property.rs` y `family_property.rs`:
+  - [ ] ¿Comparten la misma lógica de `value_hash`?
+  - [ ] ¿Ambos tienen `verify_integrity()`?
+  - [ ] ¿El campo `preferred` tiene un default razonable?
+- [ ] **Verificación de duplicación**: Buscar código repetido con:
+  ```bash
+  rg "value_hash.*sha256" crates/chem-domain/src/ -A 5
+  # Si aparece más de una vez, considerar extraer a función compartida
+  ```
+
+**1.4 Services - Verificaciones**:
+- [ ] Abrir `crates/chem-domain/src/services/molecule_service.rs`:
+  - [ ] ¿Todos los errores de provider se convierten a DomainError? (buscar `.map_err`)
+  - [ ] ¿Los métodos async usan `await` correctamente?
+  - [ ] ¿Se guarda la molécula DESPUÉS de crearla, no antes?
+- [ ] **Trace manual del flujo**: Agregar prints y ejecutar:
+  ```bash
+  # Modificar temporalmente create_from_smiles():
+  println!("1. Validando SMILES...");
+  // ... validación
+  println!("2. Creando molécula...");
+  // ... creación
+  println!("3. Guardando en BD...");
+  # Ejecutar y verificar orden correcto
+  ```
+
+#### Fase 2: Flow Engine - Checklist de Revisión Manual
+
+**2.1 FlowData - Verificaciones**:
+- [ ] Abrir `crates/flow/src/domain.rs`:
+  - [ ] ¿El campo `cursor` es siempre secuencial? (0, 1, 2, 3...)
+  - [ ] ¿El campo `command_id` es Option<String>? (para idempotencia)
+  - [ ] ¿Los timestamps usan UTC? (línea ~40 buscar `Utc`)
+- [ ] **Test de inmutabilidad**: Intentar modificar un FlowData después de crearlo (debería fallar en compilación si no tiene `mut`)
+
+**2.2 Repository Trait - Verificaciones**:
+- [ ] Abrir `crates/flow/src/repository.rs`:
+  - [ ] ¿El método `persist_data` recibe `expected_version`? (línea ~28)
+  - [ ] ¿Retorna `PersistResult` (no Result<(), Error>)? (línea ~30)
+  - [ ] ¿Todos los métodos son `&self`, no `&mut self`? (inmutabilidad externa)
+- [ ] **Revisión de firmas**: Generar doc y revisar:
+  ```bash
+  cargo doc -p flow --no-deps --open
+  # Navegar a trait FlowRepository y revisar todas las firmas
+  ```
+
+**2.3 Optimistic Locking - Verificación Crucial**:
+- [ ] Leer implementación en `stubs.rs` línea ~100:
+  ```rust
+  if self.flows[flow_id].version != expected_version {
+      return Ok(PersistResult::Conflict);
+  }
+  self.flows[flow_id].version += 1;
+  ```
+- [ ] **Test manual de concurrencia**:
+  ```bash
+  # Ejecutar test específico:
+  cargo test -p flow test_concurrent_writes -- --nocapture
+  # Debe mostrar al menos un Conflict
+  ```
+
+#### Fase 3: Persistence - Checklist de Revisión Manual
+
+**3.1 Schema Diesel - Verificaciones**:
+- [ ] Abrir `crates/chem-persistence/src/schema.rs`:
+  - [ ] ¿Todas las tablas tienen primary key definida?
+  - [ ] ¿Las foreign keys están presentes? (buscar `joinable!`)
+  - [ ] ¿Los índices están declarados? (comparar con migraciones)
+- [ ] **Verificar en BD real**:
+  ```sql
+  -- Conectarse a PostgreSQL:
+  docker exec -it flow-chem-db-1 psql -U admin -d mydatabase
+  
+  -- Listar índices:
+  \di
+  
+  -- Ver constraints:
+  SELECT conname, contype FROM pg_constraint WHERE conrelid = 'molecules'::regclass;
+  ```
+
+**3.2 DomainPersistence - Verificaciones**:
+- [ ] Abrir `crates/chem-persistence/src/domain_persistence.rs`:
+  - [ ] Buscar `save_molecule` - ¿usa transacción? (buscar `conn.transaction`)
+  - [ ] ¿Se manejan constraint violations? (buscar `diesel::result::Error::DatabaseError`)
+  - [ ] ¿Los errores son específicos, no genéricos?
+- [ ] **Test de rollback**:
+  ```rust
+  // En un test:
+  // 1. Iniciar transacción
+  // 2. Guardar molécula inválida (ej: InChIKey duplicado)
+  // 3. Verificar que se hace rollback (molécula no existe en BD)
+  ```
+
+**3.3 Migraciones - Verificaciones**:
+- [ ] Listar todas las migraciones: `ls crates/chem-persistence/migrations/`
+- [ ] **Verificar orden**: Números secuenciales sin gaps
+- [ ] **Ejecutar en BD limpia**:
+  ```bash
+  # 1. Borrar BD de test:
+  docker-compose down -v
+  docker-compose up -d db
+  
+  # 2. Ejecutar migraciones:
+  diesel migration run --database-url="postgres://admin:admin123@localhost:5432/mydatabase"
+  
+  # 3. Verificar estado:
+  diesel migration list
+  ```
+- [ ] **Rollback test**:
+  ```bash
+  diesel migration revert
+  # Verificar que las tablas desaparecen
+  diesel migration run
+  # Verificar que vuelven
+  ```
+
+#### Fase 4: Providers - Checklist de Revisión Manual
+
+**4.1 RDKit Wrapper - Verificaciones**:
+- [ ] Abrir `crates/chem-providers/python/rdkit_wrapper.py`:
+  - [ ] ¿Todas las funciones retornan dict o None (nunca excepciones sin catch)?
+  - [ ] ¿Se valida el input? (ej: SMILES no vacío)
+  - [ ] ¿Los valores float están redondeados? (evitar problemas de precisión)
+- [ ] **Test manual en Python**:
+  ```bash
+  docker exec -it flow-chem-app-dev-1 python3
+  >>> import sys
+  >>> sys.path.append('/workspace/crates/chem-providers/python')
+  >>> from rdkit_wrapper import molecule_info
+  >>> result = molecule_info("INVALID_SMILES")
+  >>> print(result)  # Debe ser None o dict con error, NO excepción
+  ```
+
+**4.2 PyO3 Binding - Verificaciones**:
+- [ ] Abrir `crates/chem-providers/src/core.rs`:
+  - [ ] ¿Se capturan todas las PyErr? (buscar `.map_err`)
+  - [ ] ¿Se liberan los GIL locks correctamente? (buscar `Python::with_gil`)
+  - [ ] ¿Los tipos se convierten correctamente? (ej: PyDict → HashMap)
+- [ ] **Test de error handling**:
+  ```rust
+  // En un test:
+  let provider = RDKitPropertyProvider::new().unwrap();
+  let result = provider.validate_structure("");  // SMILES vacío
+  assert!(result.is_err());
+  match result.unwrap_err() {
+      ProviderError::InvalidStructure(_) => { /* OK */ }
+      _ => panic!("Error type incorrecto"),
+  }
+  ```
+
+#### Fase 5: Workflows - Checklist de Revisión Manual
+
+**5.1 ChemicalFlowEngine - Verificaciones**:
+- [ ] Abrir `crates/chem-workflow/src/engine/chemical_flow.rs`:
+  - [ ] ¿El método `execute` maneja errores de cada step? (línea ~80-120)
+  - [ ] ¿Se guarda snapshot al final? (buscar `save_snapshot`)
+  - [ ] ¿Se reintentan los conflictos de persist? (buscar `retry` o loop)
+- [ ] **Trace completo**: Agregar logs en cada punto:
+  ```rust
+  println!("🔷 Iniciando workflow: {:?}", workflow_type);
+  // ... en cada step:
+  println!("📍 Ejecutando step: {}", step.name());
+  // ... al final:
+  println!("✅ Workflow completado. Flow ID: {}", flow_id);
+  ```
+  Ejecutar y verificar que el orden es correcto.
+
+**5.2 Steps CADMA - Verificaciones**:
+- [ ] Para cada step (`step1.rs` a `step5.rs`):
+  - [ ] ¿Implementa el trait `WorkflowStep`?
+  - [ ] ¿El método `name()` retorna un nombre único?
+  - [ ] ¿El método `execute()` es idempotente? (puede ejecutarse varias veces con el mismo input)
+  - [ ] ¿Se serializa correctamente el output? (buscar `serde_json::to_value`)
+- [ ] **Test de idempotencia**:
+  ```rust
+  // En un test:
+  let step = Step1;
+  let context = create_test_context();
+  let result1 = step.execute(context.clone()).await.unwrap();
+  let result2 = step.execute(context.clone()).await.unwrap();
+  assert_eq!(result1, result2);  // Mismo input → mismo output
+  ```
+
+**5.3 Context - Verificaciones**:
+- [ ] Abrir `crates/chem-workflow/src/step/context.rs`:
+  - [ ] ¿Los métodos `get`/`set` son type-safe? (usan generics)
+  - [ ] ¿Se manejan keys faltantes? (retornan Result, no panic)
+  - [ ] ¿El estado es inmutable desde afuera? (campos privados)
+- [ ] **Test de type safety**:
+  ```rust
+  let mut ctx = StepContext::new(/* ... */);
+  ctx.set("test_int", 42_i32).unwrap();
+  let val: i32 = ctx.get("test_int").unwrap();
+  assert_eq!(val, 42);
+  
+  // Esto debería fallar en compilación:
+  // let val: String = ctx.get("test_int").unwrap();
+  ```
+
+### 🧪 Verificaciones de Integración End-to-End
+
+**Después de completar cada fase**, ejecutar este test manual completo:
+
+1. **Limpiar estado**:
+   ```bash
+   docker-compose down -v
+   docker-compose up -d
+   sleep 5  # Esperar a que PostgreSQL arranque
+   ```
+
+2. **Ejecutar migraciones**:
+   ```bash
+   docker exec -it flow-chem-app-dev-1 diesel migration run
+   ```
+
+3. **Ejecutar todos los tests**:
+   ```bash
+   ./scripts/run_tests_in_docker.sh
+   ```
+
+4. **Ejecutar example completo**:
+   ```bash
+   ./scripts/run_examples.sh
+   # Opción 4: cadma_example
+   # Completar el flujo CADMA sin errores
+   ```
+
+5. **Verificar en BD**:
+   ```sql
+   docker exec -it flow-chem-db-1 psql -U admin -d mydatabase -c "
+   SELECT 
+       (SELECT COUNT(*) FROM molecules) as mol_count,
+       (SELECT COUNT(*) FROM molecule_families) as family_count,
+       (SELECT COUNT(*) FROM flow_data) as flow_count;
+   "
+   # Debe mostrar números > 0 en todas las columnas
+   ```
+
+6. **Generar coverage**:
+   ```bash
+   ./scripts/generate_coverage.sh
+   ```
+   Verificar en `artifacts/coverage/index.html` que no bajó.
+
+### 📊 Checklist de Métricas (Antes vs Después)
+
+Llenar esta tabla antes de empezar y después de cada fase:
+
+| Métrica | Baseline | Fase 1 | Fase 2 | Fase 3 | Fase 4 | Fase 5 | Meta |
+|---------|----------|--------|--------|--------|--------|--------|------|
+| Tests passing | ___/___  | ___/___ | ___/___ | ___/___ | ___/___ | ___/___ | 100% |
+| Coverage % | ___%  | ___% | ___% | ___% | ___% | ___% | >80% |
+| Clippy warnings | ___  | ___ | ___ | ___ | ___ | ___ | 0 |
+| LOC duplicado | ___  | ___ | ___ | ___ | ___ | ___ | <3% |
+| Tiempo CADMA (ms) | ___ms  | ___ms | ___ms | ___ms | ___ms | ___ms | <+5% |
+| Memoria uso (MB) | ___MB  | ___MB | ___MB | ___MB | ___MB | ___MB | ~igual |
+
+**Cómo obtener métricas**:
+
+```bash
+# Tests:
+cargo test --workspace 2>&1 | grep "test result"
+
+# Coverage:
+./scripts/generate_coverage.sh
+# Ver número en artifacts/coverage/index.html
+
+# Clippy:
+cargo clippy --workspace 2>&1 | grep "warning:"| wc -l
+
+# Duplicación:
+# Instalar tokei: cargo install tokei
+tokei crates/ --files
+
+# Tiempo CADMA:
+time docker exec flow-chem-app-dev-1 cargo run -p chem-workflow --example cadma_example
+
+# Memoria:
+docker stats flow-chem-app-dev-1 --no-stream
+```
+
+### 🔒 Criterios de Aprobación de Fase
+
+Cada fase debe cumplir TODOS estos criterios antes de continuar:
+
+- [ ] **Tests**: 100% de tests pasan (0 failed)
+- [ ] **Coverage**: No disminuye más del 2%
+- [ ] **Clippy**: 0 warnings con `-D warnings`
+- [ ] **Compilación**: `cargo build --workspace --all-features` sin warnings
+- [ ] **Documentación**: Todos los ítems públicos documentados (cargo doc warnings = 0)
+- [ ] **Code Review**: Al menos 1 otra persona revisó el código
+- [ ] **Tests manuales**: Todos los del checklist ejecutados y pasados
+- [ ] **Performance**: No más de 5% de degradación
+- [ ] **Rollback plan**: Documentado cómo revertir cambios si algo falla
 
 ### Antes de merge a main:
 
-- [ ] Todos los tests en CI pasan
-- [ ] Code review completado
-- [ ] SonarQube sin issues bloqueantes
-- [ ] Performance no degradada (benchmarks)
-- [ ] Documentación completa
-- [ ] CHANGELOG.md actualizado
+- [ ] **Todos los tests en CI pasan** (GitHub Actions, Travis, etc.)
+- [ ] **Code review completado** por 2+ reviewers
+- [ ] **SonarQube sin issues bloqueantes** (críticos o de seguridad)
+- [ ] **Performance no degradada** - benchmarks ejecutados
+- [ ] **Documentación completa** - README.md y rustdoc actualizados
+- [ ] **CHANGELOG.md actualizado** con todos los cambios
+- [ ] **Aprobación del tech lead** o arquitecto del equipo
 
 ---
 
@@ -1340,3 +1667,300 @@ use crate::domain_stubs::DomainRepository;
 ---
 
 **¡Buena suerte con la refactorización! 🚀**
+
+---
+
+## 🎯 Apéndice: Plan de Verificación Post-Refactorización
+
+Una vez completada toda la refactorización, ejecuta este plan de verificación final de 4 horas:
+
+### Hora 1: Verificación Automatizada Completa
+
+**1. Clone limpio del repositorio**:
+```bash
+cd /tmp
+git clone <tu-repo> flow-chem-fresh
+cd flow-chem-fresh
+git checkout refactor/clean-architecture
+```
+
+**2. Build desde cero**:
+```bash
+docker-compose build --no-cache
+docker-compose up -d
+docker exec -it flow-chem-app-dev-1 cargo clean
+docker exec -it flow-chem-app-dev-1 cargo build --workspace --all-features --release
+```
+- [ ] Compilación exitosa sin warnings
+- [ ] Tiempo de compilación razonable (< 5 min en release)
+
+**3. Suite de tests completa**:
+```bash
+docker exec -it flow-chem-app-dev-1 cargo test --workspace --all-features -- --test-threads=1
+```
+- [ ] Todos los tests pasan
+- [ ] No hay tests ignorados sin justificación
+- [ ] Tiempo total < 2 minutos
+
+**4. Análisis estático**:
+```bash
+docker exec -it flow-chem-app-dev-1 cargo clippy --workspace --all-features -- -D warnings
+docker exec -it flow-chem-app-dev-1 cargo fmt --all -- --check
+docker exec -it flow-chem-app-dev-1 cargo audit
+```
+- [ ] 0 warnings de clippy
+- [ ] Código formateado correctamente
+- [ ] 0 vulnerabilidades de seguridad
+
+### Hora 2: Verificación Funcional Manual
+
+**1. Ejecutar cada ejemplo**:
+```bash
+./scripts/run_examples.sh
+```
+Probar CADA opción del menú:
+- [ ] Opción 1: example-domain - crear molécula, familia, propiedades
+- [ ] Opción 2: example-main - menú completo funciona
+- [ ] Opción 3: persistence_simple_usage - persistencia funciona
+- [ ] Opción 4: cadma_example - workflow CADMA completo
+- [ ] Opción 5: all examples - todos corren sin errores
+
+**2. Verificar datos en BD**:
+```sql
+docker exec -it flow-chem-db-1 psql -U admin -d mydatabase
+
+-- Verificar integridad de datos:
+SELECT COUNT(*) FROM molecules;
+SELECT COUNT(*) FROM molecule_families;
+SELECT COUNT(*) FROM molecular_properties;
+SELECT COUNT(*) FROM flow_data;
+
+-- Verificar constraints:
+SELECT * FROM molecules WHERE inchikey IS NULL;  -- debe ser 0 filas
+SELECT * FROM molecule_families WHERE family_hash IS NULL;  -- debe ser 0 filas
+
+-- Verificar integridad referencial:
+SELECT COUNT(*) FROM family_members fm
+LEFT JOIN molecules m ON fm.molecule_inchikey = m.inchikey
+WHERE m.inchikey IS NULL;  -- debe ser 0
+```
+- [ ] Todas las queries retornan valores esperados
+- [ ] No hay datos huérfanos o corruptos
+
+**3. Test de stress básico**:
+```rust
+// Crear archivo: /tmp/stress_test.rs
+// En crates/chem-domain/tests/stress_test.rs
+#[tokio::test]
+async fn test_create_1000_molecules() {
+    let repo = setup_test_repo().await;
+    let service = MoleculeService::new(repo);
+    
+    for i in 0..1000 {
+        let smiles = format!("C{}", "C".repeat(i % 10));
+        let result = service.create_from_smiles(&smiles).await;
+        assert!(result.is_ok(), "Failed at iteration {}", i);
+    }
+}
+```
+```bash
+cargo test stress_test --release -- --nocapture
+```
+- [ ] Completa sin errors
+- [ ] Memoria estable (sin memory leaks)
+
+### Hora 3: Verificación de Arquitectura
+
+**1. Verificar separación de concerns**:
+```bash
+# Domain no debe depender de persistence:
+rg "use.*chem_persistence" crates/chem-domain/src/
+# Debe retornar 0 resultados
+
+# Domain no debe depender de providers (excepto en ports):
+rg "use.*chem_providers" crates/chem-domain/src/ | grep -v "ports"
+# Debe retornar 0 resultados
+
+# Verificar que solo domain usa RDKit:
+rg "rdkit|pyo3" crates/ --type rust | grep -v chem-providers
+# Debe retornar 0 resultados (excepto en tests)
+```
+
+**2. Revisar trait implementations**:
+```bash
+# Listar todas las implementaciones de ports:
+rg "impl.*MoleculeReader" crates/ --type rust -A 2
+rg "impl.*MoleculeWriter" crates/ --type rust -A 2
+rg "impl.*PropertyProvider" crates/ --type rust -A 2
+```
+- [ ] DieselDomainRepository implementa todos los traits
+- [ ] InMemoryRepository implementa todos los traits
+- [ ] RDKitProvider implementa PropertyProvider
+
+**3. Verificar documentación**:
+```bash
+cargo doc --workspace --no-deps --document-private-items
+```
+Abrir `target/doc/index.html` y revisar:
+- [ ] Todos los módulos públicos tienen doc comments
+- [ ] Todos los traits tienen ejemplos de uso
+- [ ] No hay "TODO" o "FIXME" en la documentación pública
+
+### Hora 4: Verificación de Calidad y Regresiones
+
+**1. Comparar con baseline**:
+```bash
+# Generar coverage actual:
+./scripts/generate_coverage.sh
+
+# Comparar con baseline guardado:
+diff artifacts/coverage_baseline/summary.txt artifacts/coverage/summary.txt
+```
+- [ ] Coverage no bajó más del 2%
+- [ ] Líneas críticas siguen cubiertas
+
+**2. Benchmark de performance**:
+```bash
+# Ejecutar CADMA 10 veces y promediar:
+for i in {1..10}; do
+  time docker exec flow-chem-app-dev-1 cargo run -p chem-workflow --example cadma_example --release 2>&1 | grep "real"
+done | awk '{sum+=$2} END {print "Average:", sum/NR, "seconds"}'
+```
+- [ ] Tiempo promedio < baseline + 5%
+
+**3. Revisar deuda técnica**:
+```bash
+# TODOs y FIXMEs:
+rg "TODO|FIXME" crates/ --type rust
+
+# Código comentado:
+rg "^\\s*//.*" crates/ --type rust -c | awk '{sum+=$NF} END {print "Commented lines:", sum}'
+
+# Complejidad ciclomática (requiere cargo-complexity):
+cargo install cargo-complexity
+cargo complexity --all
+```
+- [ ] TODOs/FIXMEs tienen issue asociado o están resueltos
+- [ ] No hay bloques grandes de código comentado
+- [ ] Ninguna función con complejidad > 15
+
+**4. Análisis de código duplicado**:
+```bash
+cargo install cargo-clone
+cargo clone check --min-duplicate-lines=5
+```
+- [ ] < 3% de código duplicado
+- [ ] Duplicaciones justificadas (ej: tests)
+
+**5. Security audit**:
+```bash
+cargo audit
+cargo install cargo-geiger
+cargo geiger --all-features
+```
+- [ ] 0 vulnerabilidades conocidas
+- [ ] Uso de `unsafe` justificado y mínimo
+
+### ✅ Criterios de Aprobación Final
+
+La refactorización se considera EXITOSA si cumple:
+
+**Funcionalidad** (Peso: 40%):
+- [x] Todos los tests pasan (100%)
+- [x] Todos los examples funcionan
+- [x] No hay regresiones funcionales
+- [x] Datos en BD tienen integridad
+
+**Calidad** (Peso: 30%):
+- [x] 0 warnings de clippy
+- [x] Coverage > 80%
+- [x] Documentación completa
+- [x] < 3% código duplicado
+
+**Arquitectura** (Peso: 20%):
+- [x] Separación de concerns respetada
+- [x] Principios SOLID aplicados
+- [x] Ports & Adapters implementado correctamente
+- [x] Dependencias invertidas
+
+**Performance** (Peso: 10%):
+- [x] No más de 5% degradación
+- [x] Sin memory leaks
+- [x] Tiempo de compilación razonable
+
+### 📊 Scorecard Final
+
+Completa esta tabla al finalizar:
+
+| Categoría | Puntaje (0-10) | Peso | Total |
+|-----------|----------------|------|-------|
+| Tests passing | ___/10 | 40% | ___ |
+| Code quality | ___/10 | 30% | ___ |
+| Architecture | ___/10 | 20% | ___ |
+| Performance | ___/10 | 10% | ___ |
+| **TOTAL** | | | **___/10** |
+
+**Interpretación**:
+- **9-10**: Excelente - refactorización exitosa
+- **7-8**: Buena - algunos ajustes menores necesarios
+- **5-6**: Aceptable - requiere revisión y mejoras
+- **< 5**: Insuficiente - considerar rollback y replantear
+
+### 🚨 Plan de Rollback
+
+Si el score final < 7 o hay issues críticos:
+
+1. **Revertir rama**:
+   ```bash
+   git checkout main
+   git branch -D refactor/clean-architecture
+   ```
+
+2. **Analizar causa raíz**:
+   - Revisar checklist de validación por fase
+   - Identificar qué se saltó o hizo mal
+   - Documentar lecciones aprendidas
+
+3. **Replanificar**:
+   - Dividir en piezas más pequeñas
+   - Hacer refactor incremental en lugar de big bang
+   - Aumentar cobertura de tests antes de refactorizar
+
+### 📝 Documento de Cierre
+
+Al finalizar exitosamente, crear documento: `docs/refactoring_closure.md`
+
+```markdown
+# Refactorización flow-chem - Cierre
+
+## Resumen Ejecutivo
+- **Fecha inicio**: ___________
+- **Fecha fin**: ___________
+- **Duración real**: ___ semanas
+- **Score final**: ___/10
+
+## Objetivos Logrados
+- [x] Objetivo 1: Limpieza de domain layer
+- [x] Objetivo 2: Refactor flow engine
+- ...
+
+## Métricas Finales
+| Métrica | Antes | Después | Mejora |
+|---------|-------|---------|--------|
+| Tests passing | ___% | ___% | +___% |
+| Coverage | ___% | ___% | +___% |
+| ...
+
+## Lecciones Aprendidas
+1. ...
+2. ...
+
+## Próximos Pasos
+1. Monitorear performance en producción
+2. Documentar nuevos patterns en wiki
+3. ...
+```
+
+---
+
+**Con estas verificaciones exhaustivas, tendrás garantía de que la refactorización fue exitosa y no introdujo regresiones. ¡Éxito! 🎉**
