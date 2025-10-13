@@ -41,7 +41,7 @@ Refactorizar el proyecto flow-chem siguiendo principios SOLID, Clean Architectur
 
 ## 🗺️ Roadmap de Refactorización
 
-### Fase 0: Preparación (1 día)
+### Fase 0: Preparación
 
 **Objetivo**: Establecer base segura para refactorizar
 
@@ -78,11 +78,11 @@ Refactorizar el proyecto flow-chem siguiendo principios SOLID, Clean Architectur
 
 ---
 
-### Fase 1: Limpieza de Domain Layer (3-4 días)
+### Fase 1: Limpieza de Domain Layer
 
 **Objetivo**: Consolidar el dominio puro sin dependencias externas
 
-#### 1.1 Eliminar código legacy (Día 1)
+#### 1.1 Eliminar código legacy
 
 **Archivos afectados:**
 
@@ -120,7 +120,7 @@ Refactorizar el proyecto flow-chem siguiendo principios SOLID, Clean Architectur
 - Ejecutar `cargo test -p chem-domain` después de cada cambio
 - Validar que no hay regresiones
 
-#### 1.2 Refactorizar Molecule (Día 1-2)
+#### 1.2 Refactorizar Molecule
 
 **Archivo:** `/crates/chem-domain/src/molecule.rs`
 
@@ -193,7 +193,7 @@ mod tests {
 }
 ```
 
-#### 1.3 Refactorizar MoleculeFamily (Día 2)
+#### 1.3 Refactorizar MoleculeFamily
 
 **Archivo:** `/crates/chem-domain/src/molecule_family.rs`
 
@@ -265,7 +265,7 @@ fn family_should_reject_duplicates() { ... }
 fn frozen_family_should_reject_mutations() { ... }
 ```
 
-#### 1.4 Refactorizar Properties (Día 3)
+#### 1.4 Refactorizar Properties
 
 **Archivos:**
 
@@ -312,7 +312,7 @@ fn frozen_family_should_reject_mutations() { ... }
    }
    ```
 
-#### 1.5 Consolidar Services (Día 4)
+#### 1.5 Consolidar Services
 
 **Archivos:** `/crates/chem-domain/src/services/`
 
@@ -386,11 +386,11 @@ fn frozen_family_should_reject_mutations() { ... }
 
 ---
 
-### Fase 2: Refactorizar Flow Engine (2-3 días)
+### Fase 2: Refactorizar Flow Engine
 
 **Objetivo**: Simplificar el motor de flujos y mejorar event sourcing
 
-#### 2.1 Separar concerns en domain.rs (Día 1)
+#### 2.1 Separar concerns en domain.rs
 
 **Archivo:** `/crates/flow/src/domain.rs`
 
@@ -438,7 +438,7 @@ fn frozen_family_should_reject_mutations() { ... }
    pub struct FlowDataBuilder { /* ... */ }
    ```
 
-#### 2.2 Refactorizar Repository (Día 2)
+#### 2.2 Refactorizar Repository
 
 **Archivo:** `/crates/flow/src/repository.rs`
 
@@ -484,7 +484,7 @@ fn frozen_family_should_reject_mutations() { ... }
    pub trait FlowRepository: FlowWriter + FlowReader + FlowBranching + SnapshotStore {}
    ```
 
-#### 2.3 Mejorar InMemoryRepository (Día 3)
+#### 2.3 Mejorar InMemoryRepository
 
 **Archivo:** `/crates/flow/src/stubs.rs`
 
@@ -522,11 +522,11 @@ fn frozen_family_should_reject_mutations() { ... }
 
 ---
 
-### Fase 3: Refactorizar Persistence Layer (3 días)
+### Fase 3: Refactorizar Persistence Layer
 
 **Objetivo**: Mejorar implementaciones de Diesel y esquema de BD
 
-#### 3.1 Revisar y optimizar Schema (Día 1)
+#### 3.1 Revisar y optimizar Schema
 
 **Archivo:** `/crates/chem-persistence/src/schema.rs`
 
@@ -554,7 +554,7 @@ fn frozen_family_should_reject_mutations() { ... }
    - Usar JSONB en PostgreSQL para mejor performance
    - Considerar tipos específicos para hashes
 
-#### 3.2 Refactorizar DomainPersistence (Día 2)
+#### 3.2 Refactorizar DomainPersistence
 
 **Archivo:** `/crates/chem-persistence/src/domain_persistence.rs`
 
@@ -623,7 +623,7 @@ fn frozen_family_should_reject_mutations() { ... }
    }
    ```
 
-#### 3.3 Refactorizar FlowPersistence (Día 3)
+#### 3.3 Refactorizar FlowPersistence
 
 **Archivo:** `/crates/chem-persistence/src/flow_persistence.rs`
 
@@ -635,11 +635,11 @@ fn frozen_family_should_reject_mutations() { ... }
 
 ---
 
-### Fase 4: Refactorizar Providers (2 días)
+### Fase 4: Refactorizar Providers
 
 **Objetivo**: Mejorar integración con RDKit y testing
 
-#### 4.1 Mejorar RDKit Wrapper (Día 1)
+#### 4.1 Mejorar RDKit Wrapper
 
 **Archivos:**
 
@@ -718,7 +718,7 @@ fn frozen_family_should_reject_mutations() { ... }
    }
    ```
 
-#### 4.2 Implementar Mock completo (Día 2)
+#### 4.2 Implementar Mock completo
 
 **Objetivo**: Mock realista para testing sin RDKit
 
@@ -764,11 +764,11 @@ fn frozen_family_should_reject_mutations() { ... }
 
 ---
 
-### Fase 5: Refactorizar Workflows (3-4 días)
+### Fase 5: Refactorizar Workflows
 
 **Objetivo**: Simplificar motor de workflows y steps
 
-#### 5.1 Refactorizar ChemicalFlowEngine (Día 1-2)
+#### 5.1 Refactorizar ChemicalFlowEngine
 
 **Archivo:** `/crates/chem-workflow/src/engine/chemical_flow.rs`
 
@@ -880,7 +880,7 @@ fn frozen_family_should_reject_mutations() { ... }
    }
    ```
 
-#### 5.2 Refactorizar Steps (Día 2-3)
+#### 5.2 Refactorizar Steps
 
 **Archivos:** `/crates/chem-workflow/src/flows/cadma_flow/steps/`
 
@@ -948,7 +948,7 @@ fn frozen_family_should_reject_mutations() { ... }
    }
    ```
 
-#### 5.3 Mejorar Context (Día 4)
+#### 5.3 Mejorar Context
 
 **Archivo:** `/crates/chem-workflow/src/step/context.rs`
 
@@ -986,11 +986,11 @@ fn frozen_family_should_reject_mutations() { ... }
 
 ---
 
-### Fase 6: Testing & Quality (2-3 días)
+### Fase 6: Testing & Quality
 
 **Objetivo**: Mejorar cobertura y calidad de tests
 
-#### 6.1 Añadir tests unitarios faltantes (Día 1)
+#### 6.1 Añadir tests unitarios faltantes
 
 **Para cada módulo refactorizado:**
 
@@ -1040,7 +1040,7 @@ mod tests {
 }
 ```
 
-#### 6.2 Añadir tests de integración (Día 2)
+#### 6.2 Añadir tests de integración
 
 ```rust
 // crates/chem-domain/tests/integration/molecule_lifecycle.rs
@@ -1069,7 +1069,7 @@ async fn test_full_molecule_lifecycle() {
 }
 ```
 
-#### 6.3 Property-based testing (Día 3)
+#### 6.3 Property-based testing
 
 ```rust
 // Usar proptest para testing basado en propiedades
@@ -1101,11 +1101,11 @@ proptest! {
 
 ---
 
-### Fase 7: Documentación (1-2 días)
+### Fase 7: Documentación
 
 **Objetivo**: Actualizar toda la documentación
 
-#### 7.1 Actualizar READMEs (Día 1)
+#### 7.1 Actualizar READMEs
 
 **Para cada crate:**
 
@@ -1144,7 +1144,7 @@ Separar en `MoleculeReader`, `MoleculeWriter`, `FamilyRepository` y
 - Requiere migraciones en código existente
 ```
 
-#### 7.2 Generar documentación API (Día 2)
+#### 7.2 Generar documentación API
 
 ```bash
 # Generar rustdoc
@@ -1155,7 +1155,7 @@ cargo doc --workspace --no-deps --document-private-items
 
 ---
 
-### Fase 8: Optimización y Performance (2 días - Opcional)
+### Fase 8: Optimización y Performance (Opcional)
 
 #### 8.1 Profiling
 
