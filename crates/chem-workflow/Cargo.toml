@@ -12,6 +12,7 @@ default = []
 mock_rdkit = ["chem-providers/mock_rdkit", "chem-domain/mock_rdkit"]
 testing = ["mock_rdkit", "chem-persistence/testing"]
 pg = ["chem-persistence/pg"]
+postgres = ["chem-persistence/postgres"]
 integration_examples = []
 
 [dependencies]
@@ -29,7 +30,7 @@ chem-persistence = { path = "../chem-persistence" }
 chem-providers = { path = "../chem-providers" }
 
 [dev-dependencies]
-mockall = "0.11"
+mockall = "0.13"
 tempfile = "3.10"
 [lib]
 name = "chem_workflow"

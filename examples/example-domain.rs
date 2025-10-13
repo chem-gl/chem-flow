@@ -133,7 +133,7 @@ fn create_from_parts(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<d
   Ok(())
 }
 fn create_from_smiles(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
-  let smiles = prompt("SMILES: ")?;
+  let _smiles = prompt("SMILES: ")?;
   println!("Creando molécula desde SMILES (puede fallar si no hay motor químico)...");
   // TODO Phase 4: Re-enable after PropertyProvider implementation
   println!("NOTA: from_smiles no disponible en Phase 2. Use from_parts con datos conocidos.");

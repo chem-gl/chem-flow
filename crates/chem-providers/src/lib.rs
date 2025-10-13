@@ -1,4 +1,4 @@
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
 use pyo3::PyErr;
 use thiserror::Error;
 pub mod core;
@@ -24,7 +24,7 @@ pub enum EngineError {
   Internal(String),
 }
 
-#[cfg(feature = "python")]
+#[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
 impl From<PyErr> for EngineError {
   fn from(err: PyErr) -> Self {
     EngineError::Internal(err.to_string())
@@ -53,13 +53,13 @@ pub struct ChemEngine {
 
 impl ChemEngine {
   pub fn init() -> Result<Self, EngineError> {
-    #[cfg(feature = "python")]
+    #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
     {
       // Delegamos la inicialización al módulo core
       core::init_python().map_err(|e| EngineError::Init(e.to_string()))?;
     }
 
-    #[cfg(not(feature = "python"))]
+    #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock, simplemente creamos la instancia sin inicializar Python
     }
@@ -70,7 +70,7 @@ impl ChemEngine {
 
 impl ChemEngineInterface for ChemEngine {
   fn get_molecule(&self, smiles: &str) -> Result<Molecule, EngineError> {
-    #[cfg(feature = "python")]
+    #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
     {
       // Validación básica
       if smiles.trim().is_empty() {
@@ -81,14 +81,31 @@ impl ChemEngineInterface for ChemEngine {
       core::get_molecule(smiles).map_err(|e| EngineError::GetMolecule(e.to_string()))
     }
 
-    #[cfg(not(feature = "python"))]
+    #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock sin Python, devolvemos una molécula predefinida
       if smiles.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
 
-      Ok(Molecule { inchikey: format!("MOCK-{}", smiles),
+      // Genera un InChIKey pseudo-válido (14-10-1, A-Z y 0-9)
+      fn mock_inchikey(seed: &str) -> String {
+        let bytes = seed.as_bytes();
+        let mut out: Vec<char> = Vec::with_capacity(25);
+        let target_len = 25; // 14 + 10 + 1
+        for i in 0..target_len {
+          let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(11) };
+          let v = (b % 36) as u8;
+          let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
+          out.push(ch);
+        }
+        let s1: String = out.iter().take(14).collect();
+        let s2: String = out.iter().skip(14).take(10).collect();
+        let s3: String = out.iter().skip(24).take(1).collect();
+        format!("{}-{}-{}", s1, s2, s3)
+      }
+
+      Ok(Molecule { inchikey: mock_inchikey(smiles),
                     inchi: format!("InChI=MOCK/{}", smiles),
                     smiles: smiles.to_string(),
                     num_atoms: 1,
@@ -107,11 +124,11 @@ impl ChemEngineInterface for ChemEngine {
   fn fuse(&self,
           smiles_a: &str,
           smiles_b: &str,
-          atom_a: usize,
-          atom_b: usize,
-          bond_order: u8)
+          _atom_a: usize,
+          _atom_b: usize,
+          _bond_order: u8)
           -> Result<Molecule, EngineError> {
-    #[cfg(feature = "python")]
+    #[cfg(all(feature = "python", not(feature = "mock_rdkit")))]
     {
       // Validación básica
       if smiles_a.trim().is_empty() || smiles_b.trim().is_empty() {
@@ -119,19 +136,36 @@ impl ChemEngineInterface for ChemEngine {
       }
 
       // Llamamos al método de Python
-      core::fuse_molecules(smiles_a, smiles_b, atom_a, atom_b, bond_order).map_err(|e| {
-                                                                            EngineError::GetMolecule(e.to_string())
-                                                                          })
+      core::fuse_molecules(smiles_a, smiles_b, _atom_a, _atom_b, _bond_order).map_err(|e| {
+                                                                               EngineError::GetMolecule(e.to_string())
+                                                                             })
     }
 
-    #[cfg(not(feature = "python"))]
+    #[cfg(any(not(feature = "python"), feature = "mock_rdkit"))]
     {
       // En modo mock sin Python, combinamos los SMILES
       if smiles_a.trim().is_empty() || smiles_b.trim().is_empty() {
         return Err(EngineError::Validation("SMILES vacío".to_string()));
       }
 
-      Ok(Molecule { inchikey: format!("MOCK-FUSED-{}-{}", smiles_a, smiles_b),
+      fn mock_inchikey(seed: &str) -> String {
+        let bytes = seed.as_bytes();
+        let mut out: Vec<char> = Vec::with_capacity(25);
+        let target_len = 25; // 14 + 10 + 1
+        for i in 0..target_len {
+          let b = if i < bytes.len() { bytes[i] } else { (i as u8).wrapping_mul(7) };
+          let v = (b % 36) as u8;
+          let ch = if v < 10 { (b'0' + v) as char } else { (b'A' + (v - 10)) as char };
+          out.push(ch);
+        }
+        let s1: String = out.iter().take(14).collect();
+        let s2: String = out.iter().skip(14).take(10).collect();
+        let s3: String = out.iter().skip(24).take(1).collect();
+        format!("{}-{}-{}", s1, s2, s3)
+      }
+
+      let combined = format!("{}+{}", smiles_a, smiles_b);
+      Ok(Molecule { inchikey: mock_inchikey(&combined),
                     inchi: format!("InChI=MOCK/FUSED/{}-{}", smiles_a, smiles_b),
                     smiles: format!("{}.{}", smiles_a, smiles_b),
                     num_atoms: 2,

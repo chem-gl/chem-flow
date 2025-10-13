@@ -109,45 +109,73 @@ mod tests {
   }
   #[test]
   fn test_get_molecule() {
-    init_python().expect("Fallo al inicializar Python/RDKit");
-    let smiles = "CCO"; // Etanol
-    let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
-    assert_eq!(mol.smiles, "CCO");
-    assert_eq!(mol.num_atoms, 3);
-    assert!((mol.mol_weight - 46.07).abs() < 0.1); // Peso molecular
-                                                   // aproximado
+    // Este test requiere RDKit real, deshabilitar cuando se usa la feature
+    // mock_rdkit
+    #[cfg(feature = "mock_rdkit")]
+    {
+      // Skip: cuando mock_rdkit está activo, no se inicializa Python/RDKit
+      return;
+    }
+    #[cfg(not(feature = "mock_rdkit"))]
+    {
+      init_python().expect("Fallo al inicializar Python/RDKit");
+      let smiles = "CCO"; // Etanol
+      let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
+      assert_eq!(mol.smiles, "CCO");
+      assert_eq!(mol.num_atoms, 3);
+      assert!((mol.mol_weight - 46.07).abs() < 0.1); // Peso molecular
+                                                     // aproximado
+    }
   }
 
   #[test]
   fn test_structure_atoms_and_bonds() {
-    // Verify that structure atoms, bonds and substitution points are present
-    init_python().expect("Fallo al inicializar Python/RDKit");
-    let smiles = "CCO"; // ethanol: C-C-O
-    let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
-    let s = mol.structure.expect("Expected structure to be present");
-    // atoms count should match num_atoms
-    assert_eq!(s.atoms.len() as u32, mol.num_atoms);
-    // there should be at least one bond
-    assert!(!s.bonds.is_empty(), "Expected at least one bond");
-    // check first atom fields
-    let a0 = &s.atoms[0];
-    assert!(a0.atomic_number > 0);
-    assert!(!a0.symbol.is_empty());
-    // substitution points should contain at least one heavy atom (indices)
-    assert!(!s.substitution_points.is_empty(), "Expected substitution points");
+    // Este test requiere RDKit real, deshabilitar cuando se usa la feature
+    // mock_rdkit
+    #[cfg(feature = "mock_rdkit")]
+    {
+      return;
+    }
+    #[cfg(not(feature = "mock_rdkit"))]
+    {
+      // Verify that structure atoms, bonds and substitution points are present
+      init_python().expect("Fallo al inicializar Python/RDKit");
+      let smiles = "CCO"; // ethanol: C-C-O
+      let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
+      let s = mol.structure.expect("Expected structure to be present");
+      // atoms count should match num_atoms
+      assert_eq!(s.atoms.len() as u32, mol.num_atoms);
+      // there should be at least one bond
+      assert!(!s.bonds.is_empty(), "Expected at least one bond");
+      // check first atom fields
+      let a0 = &s.atoms[0];
+      assert!(a0.atomic_number > 0);
+      assert!(!a0.symbol.is_empty());
+      // substitution points should contain at least one heavy atom (indices)
+      assert!(!s.substitution_points.is_empty(), "Expected substitution points");
+    }
   }
 
   #[test]
   fn test_benzene_aromatic_bonds() {
-    // Benzene has aromatic bonds; ensure is_aromatic is deserialized
-    init_python().expect("Fallo al inicializar Python/RDKit");
-    let smiles = "c1ccccc1"; // benzene
-    let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
-    let s = mol.structure.expect("Expected structure to be present");
-    // should have 6 carbon atoms
-    let carbons = s.atoms.iter().filter(|a| a.symbol == "C").count();
-    assert_eq!(carbons, 6);
-    // at least one bond should be aromatic
-    assert!(s.bonds.iter().any(|b| b.is_aromatic), "Expected aromatic bond");
+    // Este test requiere RDKit real, deshabilitar cuando se usa la feature
+    // mock_rdkit
+    #[cfg(feature = "mock_rdkit")]
+    {
+      return;
+    }
+    #[cfg(not(feature = "mock_rdkit"))]
+    {
+      // Benzene has aromatic bonds; ensure is_aromatic is deserialized
+      init_python().expect("Fallo al inicializar Python/RDKit");
+      let smiles = "c1ccccc1"; // benzene
+      let mol = get_molecule(smiles).expect("Fallo al obtener la molécula");
+      let s = mol.structure.expect("Expected structure to be present");
+      // should have 6 carbon atoms
+      let carbons = s.atoms.iter().filter(|a| a.symbol == "C").count();
+      assert_eq!(carbons, 6);
+      // at least one bond should be aromatic
+      assert!(s.bonds.iter().any(|b| b.is_aromatic), "Expected aromatic bond");
+    }
   }
 }

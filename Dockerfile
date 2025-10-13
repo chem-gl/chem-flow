@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     libpq-dev \
+    libsqlite3-dev \
+    sqlite3 \
     git \
     cmake \
     && rm -rf /var/lib/apt/lists/*
