@@ -12,12 +12,5 @@ pub use molecule_reader::MoleculeReader;
 pub use molecule_writer::MoleculeWriter;
 pub use property_provider::{MoleculeStructure, PropertyProvider, PropertyType, ProviderMolecule};
 pub use property_repository::{OwnedFamilyProperty, OwnedMolecularProperty, PropertyRepository};
-// ============================================================================
-// PHASE 4: Composite Port for backward compatibility
-// ============================================================================
-/// Composite trait that combines all domain ports for convenience.
-/// This allows code that previously used `DomainRepository` to migrate easily.
 pub trait AllDomainPorts: MoleculeReader + MoleculeWriter + FamilyRepository + PropertyRepository + Send + Sync {}
-// Blanket implementation: any type that implements all four ports gets
-// AllDomainPorts
 impl<T> AllDomainPorts for T where T: MoleculeReader + MoleculeWriter + FamilyRepository + PropertyRepository + Send + Sync {}

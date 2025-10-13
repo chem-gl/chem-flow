@@ -1,13 +1,17 @@
-// family_property.rs
+//! Entidad FamilyProperty - Propiedad asociada a una familia de moléculas con
+//! hash para integridad
+
 use crate::{DomainError, MoleculeFamily};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use uuid::Uuid;
-#[derive(Debug, Clone)]
-pub struct FamilyProperty<'a, V, M> {
+
+/// Entidad FamilyProperty
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FamilyProperty<V, M> {
   id: Uuid,
-  family: &'a MoleculeFamily,
+  family: MoleculeFamily,
   property_type: String,
   value: V,
   quality: Option<String>,
@@ -15,109 +19,134 @@ pub struct FamilyProperty<'a, V, M> {
   value_hash: String,
   metadata: M,
 }
-impl<'a, V, M> FamilyProperty<'a, V, M>
+
+impl<V, M> FamilyProperty<V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
 {
-  pub fn new(family: &'a MoleculeFamily,
+  /// Crea una nueva propiedad de familia
+  pub fn new(family: MoleculeFamily,
              property_type: &str,
              value: V,
              quality: Option<String>,
              preferred: bool,
              metadata: M)
              -> Result<Self, DomainError> {
-    if property_type.trim().is_empty() {
+    let normalized_type = property_type.trim().to_lowercase();
+    if normalized_type.is_empty() {
       return Err(DomainError::validation("FamilyProperty", "El tipo de propiedad no puede estar vacío"));
     }
-    let mut hasher = Sha256::new();
-    hasher.update(family.family_hash().as_bytes());
-    hasher.update(property_type.as_bytes());
-    let value_json = serde_json::to_string(&value)?;
-    hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&metadata)?;
-    hasher.update(metadata_json.as_bytes());
-    let value_hash = format!("{:x}", hasher.finalize());
-    Ok(Self { id: Uuid::new_v4(),
-              family,
-              property_type: property_type.to_string(),
-              value,
-              quality,
-              preferred,
-              value_hash,
-              metadata })
+
+    let value_hash = Self::calculate_value_hash(family.family_hash(), &normalized_type, &value, &metadata)?;
+
+    Ok(Self { id: Uuid::new_v4(), family, property_type: normalized_type, value, quality, preferred, value_hash, metadata })
   }
-  pub fn id(&self) -> Uuid {
-    self.id
-  }
-  pub fn family_id(&self) -> Uuid {
-    self.family.id()
-  }
-  pub fn quick_new(family: &'a MoleculeFamily, property_type: &str, value: V) -> Result<Self, DomainError>
+
+  /// Crea una propiedad rápida con valores por defecto
+  pub fn quick_new(family: MoleculeFamily, property_type: &str, value: V) -> Result<Self, DomainError>
     where M: Default
   {
     Self::new(family, property_type, value, None, false, M::default())
   }
-  pub fn family(&self) -> &MoleculeFamily {
-    self.family
+
+  /// Calcula el hash de la propiedad
+  fn calculate_value_hash(family_hash: &str, property_type: &str, value: &V, metadata: &M) -> Result<String, DomainError> {
+    let mut hasher = Sha256::new();
+    hasher.update(family_hash.as_bytes());
+    hasher.update(property_type.as_bytes());
+    let value_json = serde_json::to_string(value)?;
+    hasher.update(value_json.as_bytes());
+    let metadata_json = serde_json::to_string(metadata)?;
+    hasher.update(metadata_json.as_bytes());
+    Ok(format!("{:x}", hasher.finalize()))
   }
+
+  /// Verifica la integridad del hash de la propiedad
+  pub fn verify_integrity(&self) -> Result<bool, DomainError> {
+    let calculated_hash =
+      Self::calculate_value_hash(self.family.family_hash(), &self.property_type, &self.value, &self.metadata)?;
+    Ok(calculated_hash == self.value_hash)
+  }
+
+  // === Getters ===
+
+  pub fn id(&self) -> Uuid {
+    self.id
+  }
+
+  pub fn family_id(&self) -> Uuid {
+    self.family.id()
+  }
+
+  pub fn family(&self) -> &MoleculeFamily {
+    &self.family
+  }
+
   pub fn property_type(&self) -> &str {
     &self.property_type
   }
+
   pub fn value(&self) -> &V {
     &self.value
   }
+
   pub fn quality(&self) -> Option<&str> {
     self.quality.as_deref()
   }
+
   pub fn preferred(&self) -> bool {
     self.preferred
   }
-  pub fn metadata(&self) -> &M {
-    &self.metadata
-  }
+
   pub fn value_hash(&self) -> &str {
     &self.value_hash
   }
+
+  pub fn metadata(&self) -> &M {
+    &self.metadata
+  }
+
+  // === Métodos de modificación (crean nuevas instancias) ===
+
+  /// Crea una nueva propiedad con calidad actualizada
   pub fn with_quality(&self, quality: Option<String>) -> Result<Self, DomainError> {
-    Self::new(self.family,
+    Self::new(self.family.clone(),
               &self.property_type,
               self.value.clone(),
               quality,
               self.preferred,
               self.metadata.clone())
   }
+
+  /// Crea una nueva propiedad con metadata actualizado
   pub fn with_metadata(&self, metadata: M) -> Result<Self, DomainError> {
-    Self::new(self.family,
+    Self::new(self.family.clone(),
               &self.property_type,
               self.value.clone(),
               self.quality.clone(),
               self.preferred,
               metadata)
   }
+
+  /// Crea una nueva propiedad con preferencia actualizada
   pub fn with_preferred(&self, preferred: bool) -> Result<Self, DomainError> {
-    Self::new(self.family,
+    Self::new(self.family.clone(),
               &self.property_type,
               self.value.clone(),
               self.quality.clone(),
               preferred,
               self.metadata.clone())
   }
+
+  // === Métodos de dominio ===
+
+  /// Verifica si dos propiedades son equivalentes (mismo hash)
   pub fn is_equivalent(&self, other: &Self) -> bool {
     self.value_hash == other.value_hash
   }
-  pub fn verify_integrity(&self) -> Result<bool, DomainError> {
-    let mut hasher = Sha256::new();
-    hasher.update(self.family.family_hash().as_bytes());
-    hasher.update(self.property_type.as_bytes());
-    let value_json = serde_json::to_string(&self.value)?;
-    hasher.update(value_json.as_bytes());
-    let metadata_json = serde_json::to_string(&self.metadata)?;
-    hasher.update(metadata_json.as_bytes());
-    let calculated_hash = format!("{:x}", hasher.finalize());
-    Ok(calculated_hash == self.value_hash)
-  }
 }
-impl<'a, V, M> fmt::Display for FamilyProperty<'a, V, M>
+
+impl<V, M> fmt::Display for FamilyProperty<V, M>
   where V: fmt::Debug,
         M: fmt::Debug
 {
@@ -127,7 +156,8 @@ impl<'a, V, M> fmt::Display for FamilyProperty<'a, V, M>
            self.id, self.property_type, self.preferred)
   }
 }
-impl<'a, V, M> PartialEq for FamilyProperty<'a, V, M>
+
+impl<V, M> PartialEq for FamilyProperty<V, M>
   where V: Serialize + Clone,
         M: Serialize + Clone
 {
@@ -135,62 +165,71 @@ impl<'a, V, M> PartialEq for FamilyProperty<'a, V, M>
     self.is_equivalent(other)
   }
 }
+
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::MoleculeFamily;
+  use crate::{Molecule, MoleculeFamily};
   use serde_json::json;
+
   #[test]
   fn test_family_property_creation() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                           "CCO",
-                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                           json!({}))?;
-    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
-                                           "CCN",
-                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
-                                           json!({}))?;
+    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                    "CCO",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    json!({}))?;
+    let mol2 = Molecule::from_parts("QUSNBJAOOMFDIB-UHFFFAOYSA-N",
+                                    "CCN",
+                                    "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                    json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});
-    let property = FamilyProperty::new(&family, "average_logP", 2.5f64, Some("high".to_string()), true, metadata)?;
-    assert_eq!(property.property_type(), "average_logP");
+    let property = FamilyProperty::new(family, "average_logP", 2.5f64, Some("high".to_string()), true, metadata)?;
+    assert_eq!(property.property_type(), "average_logp");
     assert_eq!(property.value(), &2.5);
     assert!(property.verify_integrity()?);
     Ok(())
   }
+
   #[test]
   fn test_family_property_equivalence() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                           "CCO",
-                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                           json!({}))?;
-    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
-                                           "CCN",
-                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
-                                           json!({}))?;
+    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                    "CCO",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    json!({}))?;
+    let mol2 = Molecule::from_parts("QUSNBJAOOMFDIB-UHFFFAOYSA-N",
+                                    "CCN",
+                                    "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                    json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});
-    let prop1 = FamilyProperty::new(&family, "average_logP", 2.5, Some("high".to_string()), true, metadata.clone())?;
-    let prop2 = FamilyProperty::new(&family, "average_logP", 2.5, Some("high".to_string()), true, metadata)?;
+    let prop1 = FamilyProperty::new(family.clone(),
+                                    "average_logP",
+                                    2.5,
+                                    Some("high".to_string()),
+                                    true,
+                                    metadata.clone())?;
+    let prop2 = FamilyProperty::new(family, "average_logP", 2.5, Some("high".to_string()), true, metadata)?;
     assert_eq!(prop1, prop2);
     Ok(())
   }
+
   #[test]
   fn test_family_property_empty_type() -> Result<(), DomainError> {
-    let mol1 = crate::Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                                           "CCO",
-                                           "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
-                                           json!({}))?;
-    let mol2 = crate::Molecule::from_parts("ATUOYWHBWRKTHZ-UHFFFAOYSA-N",
-                                           "CCN",
-                                           "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
-                                           json!({}))?;
+    let mol1 = Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
+                                    "CCO",
+                                    "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+                                    json!({}))?;
+    let mol2 = Molecule::from_parts("QUSNBJAOOMFDIB-UHFFFAOYSA-N",
+                                    "CCN",
+                                    "InChI=1S/C2H7N/c1-2-3/h2-3H2,1H3",
+                                    json!({}))?;
     let provenance = json!({"source": "test"});
     let family = MoleculeFamily::new(vec![mol1, mol2], provenance)?;
     let metadata = json!({"calculation_method": "test"});
-    let result = FamilyProperty::new(&family, "", 2.5, Some("high".to_string()), true, metadata);
+    let result = FamilyProperty::new(family, "", 2.5, Some("high".to_string()), true, metadata);
     assert!(result.is_err());
     Ok(())
   }
