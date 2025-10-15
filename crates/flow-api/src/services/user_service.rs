@@ -75,12 +75,29 @@ impl TeamService {
                       members: vec![] })
   }
 
-  pub async fn add_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), ApiError> {
+  /// Add a member to a team. `actor` is the authenticated user requesting the operation and
+  /// must already be a member of the team to add/remove other members.
+  pub async fn add_member(&self, team_id: Uuid, user_id: Uuid, actor: Option<Uuid>) -> Result<(), ApiError> {
+    // If actor provided, ensure they are a member of the team
+    if let Some(a) = actor {
+      let members = self.repo.get_team_members(&team_id).await?;
+      let ok = members.iter().any(|m| m.id == a);
+      if !ok {
+        return Err(ApiError::Unauthorized("not a member of the team".to_string()));
+      }
+    }
     self.repo.add_member(&team_id, &user_id).await?;
     Ok(())
   }
 
-  pub async fn remove_member(&self, team_id: Uuid, user_id: Uuid) -> Result<(), ApiError> {
+  pub async fn remove_member(&self, team_id: Uuid, user_id: Uuid, actor: Option<Uuid>) -> Result<(), ApiError> {
+    if let Some(a) = actor {
+      let members = self.repo.get_team_members(&team_id).await?;
+      let ok = members.iter().any(|m| m.id == a);
+      if !ok {
+        return Err(ApiError::Unauthorized("not a member of the team".to_string()));
+      }
+    }
     self.repo.remove_member(&team_id, &user_id).await?;
     Ok(())
   }
