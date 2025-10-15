@@ -88,16 +88,21 @@ pub fn create_router(state: AppState) -> Router {
                                 .with_state(state.clone());
 
   // Family routes (create only for now)
-  let family_routes =
-    Router::new().route("/families", post(family_handlers::create_family)).with_state(Arc::new(state.clone()));
+  let family_routes = Router::new().route("/families", post(family_handlers::create_family))
+                                   .route("/families/:id/molecules", post(family_handlers::add_molecule_to_family))
+                                   .route("/families/:id/molecules/:inchikey",
+                                          delete(family_handlers::remove_molecule_from_family))
+                                   .with_state(Arc::new(state.clone()));
 
   // Molecule routes (stubs)
   let molecule_routes = Router::new().route("/molecules", post(molecule_handlers::create_molecule))
                                      .route("/molecules", get(molecule_handlers::list_molecules))
+                                     .route("/molecules/:inchikey", delete(molecule_handlers::delete_molecule))
                                      .with_state(Arc::new(state.clone()));
 
   // Property routes (stubs)
   let property_routes = Router::new().route("/properties", post(property_handlers::create_molecular_property))
+                                     .route("/properties/:inchikey", get(property_handlers::list_molecular_properties))
                                      .with_state(Arc::new(state.clone()));
 
   // Auth routes (use UserState)

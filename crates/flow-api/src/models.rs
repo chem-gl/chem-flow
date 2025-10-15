@@ -386,6 +386,19 @@ pub struct CreateMolecularPropertyRequest {
   pub metadata: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MolecularPropertyResponse {
+  pub id: Uuid,
+  pub molecule_inchikey: String,
+  pub property_type: String,
+  pub value: serde_json::Value,
+  pub quality: Option<String>,
+  pub preferred: bool,
+  pub value_hash: String,
+  #[serde(default)]
+  pub metadata: serde_json::Value,
+}
+
 // ============================================================================
 // DTOs de Control de Acceso
 // ============================================================================

@@ -49,4 +49,53 @@ impl FamilyService {
                         provenance: family.provenance().clone(),
                         molecule_inchikeys: family.molecules().iter().map(|m| m.inchikey().to_string()).collect() })
   }
+
+  pub async fn add_molecule(&self,
+                            family_id: Uuid,
+                            molecule_inchikey: String,
+                            owner: Option<Uuid>)
+                            -> Result<Uuid, ApiError> {
+    // Ensure owner has family access to modify
+    if let Some(uid) = owner {
+      let has_family = chem_domain::ports::AccessControl::has_molecule_family_access(&*self.repo, &uid, &family_id)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+      if !has_family {
+        return Err(ApiError::Unauthorized("no access to modify family".to_string()));
+      }
+      // Ensure owner has access to the molecule being added (if exists)
+      if let Ok(Some(m)) = chem_domain::MoleculeReader::get_molecule(&*self.repo, &molecule_inchikey) {
+        let has_mol = chem_domain::ports::AccessControl::has_molecule_access(&*self.repo, &uid, &m.id())
+          .await
+          .map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+        if !has_mol {
+          return Err(ApiError::Unauthorized("no access to molecule to add".to_string()));
+        }
+      }
+    }
+    let mol = if let Ok(Some(m)) = chem_domain::MoleculeReader::get_molecule(&*self.repo, &molecule_inchikey) {
+      m
+    } else {
+      return Err(ApiError::NotFound(format!("molecule {} not found", molecule_inchikey)));
+    };
+    let new_id =
+      self.repo.add_molecule_to_family(&family_id, mol).map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+    Ok(new_id)
+  }
+
+  pub async fn remove_molecule(&self, family_id: Uuid, inchikey: &str, owner: Option<Uuid>) -> Result<Uuid, ApiError> {
+    // Ensure owner has family access to modify
+    if let Some(uid) = owner {
+      let has_family = chem_domain::ports::AccessControl::has_molecule_family_access(&*self.repo, &uid, &family_id)
+        .await
+        .map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+      if !has_family {
+        return Err(ApiError::Unauthorized("no access to modify family".to_string()));
+      }
+    }
+    let removed_id = self.repo
+                         .remove_molecule_from_family(&family_id, inchikey)
+                         .map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+    Ok(removed_id)
+  }
 }

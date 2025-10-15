@@ -87,4 +87,23 @@ impl MoleculeService {
                   .collect();
     Ok(out)
   }
+
+  pub async fn delete_molecule(&self, inchikey: &str, owner: Option<uuid::Uuid>) -> Result<(), ApiError> {
+    // If owner provided, ensure they have molecule access
+    if let Some(uid) = owner {
+      // Find molecule uuid
+      if let Ok(Some(m)) = chem_domain::MoleculeReader::get_molecule(&*self.repo, inchikey) {
+        let ok = chem_domain::ports::AccessControl::has_molecule_access(&*self.repo, &uid, &m.id())
+          .await
+          .map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+        if !ok {
+          return Err(ApiError::Unauthorized("no access to delete molecule".to_string()));
+        }
+      }
+    }
+    chem_domain::MoleculeWriter::delete_molecule(&*self.repo, inchikey).map_err(|e| {
+                                                                         ApiError::InternalError(format!("DB error: {}", e))
+                                                                       })?;
+    Ok(())
+  }
 }

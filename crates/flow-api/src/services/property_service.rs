@@ -73,4 +73,21 @@ impl PropertyService {
     }
     Ok(())
   }
+
+  pub async fn get_molecular_properties(&self,
+                                        inchikey: &str)
+                                        -> Result<Vec<crate::models::MolecularPropertyResponse>, ApiError> {
+    let props = chem_domain::PropertyRepository::get_molecular_properties(&*self.repo, inchikey).map_err(|e| ApiError::InternalError(format!("DB error: {}", e)))?;
+    let out = props.into_iter()
+                   .map(|p| crate::models::MolecularPropertyResponse { id: p.id,
+                                                                       molecule_inchikey: p.molecule_inchikey,
+                                                                       property_type: p.property_type,
+                                                                       value: p.value,
+                                                                       quality: p.quality,
+                                                                       preferred: p.preferred,
+                                                                       value_hash: p.value_hash,
+                                                                       metadata: p.metadata })
+                   .collect();
+    Ok(out)
+  }
 }
