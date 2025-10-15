@@ -4,7 +4,7 @@
 
 use crate::errors::{ApiError, ErrorResponse};
 use crate::models::*;
-use crate::services::CadmaService;
+use crate::services::{CadmaService, FamilyService};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -15,6 +15,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct AppState {
   pub cadma_service: Arc<CadmaService>,
+  pub family_service: Arc<FamilyService>,
 }
 
 // ============================================================================

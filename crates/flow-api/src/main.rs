@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_imports, unused_variables)]
 //! Servidor HTTP principal para Flow-Chem CADMA API
 //!
 //! Implementa un servidor REST completo con OpenAPI/Swagger y persistencia real
@@ -8,6 +9,7 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod auth;
 mod config;
 mod errors;
 mod handlers;
@@ -83,10 +85,15 @@ async fn main() -> Result<()> {
   tracing::info!("✅ Repositorios inicializados correctamente");
 
   // Crear servicio CADMA
-  let cadma_service = Arc::new(CadmaService::new(flow_repo, domain_repo));
+  let cadma_service = Arc::new(CadmaService::new(flow_repo, domain_repo.clone()));
 
-  // Crear estado de la aplicación
-  let app_state = AppState { cadma_service };
+  // Crear estado de la aplicación (solo CADMA por ahora; auth/team servicios se
+  // añaden cuando estén listos)
+    // Family service (uses the same domain repo)
+    let family_service = Arc::new(crate::services::FamilyService::new(domain_repo.clone()));
+
+    // Crear estado de la aplicación
+    let app_state = AppState { cadma_service, family_service };
 
   // Crear router con todas las rutas
   let app = create_router(app_state).layer(TraceLayer::new_for_http());

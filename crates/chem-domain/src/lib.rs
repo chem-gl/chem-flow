@@ -71,10 +71,13 @@ pub mod domain;
 pub mod application;
 
 // === Legacy Support (Phase 4: Remove) ===
+pub mod access;
 mod domain_stubs;
 mod errors;
 mod family_property;
 mod molecular_property;
+pub mod team;
+pub mod user;
 // mod molecule;  // Now in domain::entities
 // mod molecule_family;  // Now in domain::entities
 pub mod ports;

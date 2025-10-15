@@ -134,10 +134,8 @@ fn create_from_parts(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<d
 fn create_from_smiles(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<dyn Error>> {
   let _smiles = prompt("SMILES: ")?;
   println!("Creando molécula desde SMILES (puede fallar si no hay motor químico)...");
-  // TODO Phase 4: Re-enable after PropertyProvider implementation
   println!("NOTA: from_smiles no disponible en Phase 2. Use from_parts con datos conocidos.");
   println!("Ejemplo: CCO -> InChIKey=LFQSCWFLJHTTHZ-UHFFFAOYSA-N, InChI=InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3");
-  // For now, create a hardcoded example
   match Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
                              "CCO",
                              "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",

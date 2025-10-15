@@ -50,6 +50,12 @@ flow = { path = "../flow" }
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 
+# Auth
+jsonwebtoken = "9.3.0"
+axum-extra = { version = "0.9.3", features = ["typed-header"] }
+headers = "0.3"
+
+
 [features]
 # Default to sqlite for local development and tests
 default = ["sqlite"]

@@ -2,6 +2,7 @@
 //!
 //! API RESTful para ejecutar workflows químicos CADMA con persistencia real
 
+pub mod auth;
 pub mod config;
 pub mod errors;
 pub mod handlers;

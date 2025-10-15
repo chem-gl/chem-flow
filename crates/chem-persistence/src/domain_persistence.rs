@@ -4,14 +4,15 @@ use crate::schema;
 use crate::schema::families::dsl as families_dsl;
 use crate::schema::family_members::dsl as fm_dsl;
 use crate::schema::molecules::dsl as molecules_dsl;
+use async_trait::async_trait;
 use chem_domain::domain::value_objects::{InChI, InChIKey, MolecularFormula, Smiles};
+use chem_domain::ports::{access_control::AccessControl, team_repository::TeamRepository, user_repository::UserRepository};
 use chem_domain::ports::{FamilyRepository, MoleculeReader, MoleculeWriter, PropertyRepository};
 use chem_domain::{DomainError, Molecule, MoleculeFamily};
 use chem_domain::{OwnedFamilyProperty, OwnedMolecularProperty};
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel::result::Error as DieselError;
-// ...existing code...
 use std::sync::Arc;
 use uuid::Uuid;
 #[cfg(feature = "postgres")]
@@ -192,6 +193,60 @@ struct FamilyMemberRow {
   pub family_id: String,
   pub molecule_inchikey: String,
 }
+// Diesel row structs for the new tables
+#[derive(Debug, Queryable, Insertable, AsChangeset)]
+#[diesel(table_name = schema::users)]
+struct UserRow {
+  pub id: String,
+  pub name: String,
+  pub email: String,
+  pub university: Option<String>,
+  pub password_hash: String,
+  pub created_at: i64,
+  pub updated_at: i64,
+}
+
+#[derive(Debug, Queryable, Insertable, AsChangeset)]
+#[diesel(table_name = schema::teams)]
+struct TeamRow {
+  pub id: String,
+  pub name: String,
+  pub description: Option<String>,
+  pub created_at: i64,
+  pub updated_at: i64,
+}
+
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = schema::team_members)]
+struct TeamMemberRowDb {
+  pub team_id: String,
+  pub user_id: String,
+}
+
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = schema::molecule_family_access)]
+struct MoleculeFamilyAccessRow {
+  pub family_id: String,
+  pub accessor_id: String,
+  pub accessor_type: String,
+}
+
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = schema::molecule_access)]
+struct MoleculeAccessRow {
+  pub molecule_id: String,
+  pub accessor_id: String,
+  pub accessor_type: String,
+}
+
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = schema::flow_access)]
+struct FlowAccessRow {
+  pub flow_id: String,
+  pub accessor_id: String,
+  pub accessor_type: String,
+}
+
 // ============================================================================
 // PHASE 4: Port Implementations for DieselDomainRepository
 // ============================================================================
@@ -229,6 +284,353 @@ fn molecule_from_row(r: &MoleculeRow) -> Result<Molecule, DomainError> {
                        created_at,
                        updated_at,
                        version)
+}
+
+// ====================== UserRepository (async) ==============================
+#[async_trait]
+impl UserRepository for DieselDomainRepository {
+  async fn save(&self, user: &chem_domain::user::User) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = UserRow { id: user.id.to_string(),
+                        name: user.name.clone(),
+                        email: user.email.clone(),
+                        university: user.university.clone(),
+                        password_hash: user.password_hash.clone(),
+                        created_at: user.created_at.timestamp(),
+                        updated_at: user.updated_at.timestamp() };
+    map_db_err(diesel::insert_into(schema::users::table).values(&row)
+                                                        .on_conflict(schema::users::id)
+                                                        .do_update()
+                                                        .set(&row)
+                                                        .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn find_by_id(&self, id: &Uuid) -> Result<Option<chem_domain::user::User>, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let id_s = id.to_string();
+    let opt = schema::users::dsl::users.filter(schema::users::dsl::id.eq(&id_s))
+                                       .first::<UserRow>(&mut conn)
+                                       .optional()
+                                       .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(opt.map(|r| {
+            chem_domain::user::User { id: Uuid::parse_str(&r.id).unwrap_or(*id),
+                                      name: r.name,
+                                      email: r.email,
+                                      university: r.university,
+                                      password_hash: r.password_hash,
+                                      created_at:
+                                        chrono::DateTime::from_timestamp(r.created_at, 0).unwrap_or_else(chrono::Utc::now),
+                                      updated_at:
+                                        chrono::DateTime::from_timestamp(r.updated_at, 0).unwrap_or_else(chrono::Utc::now) }
+          }))
+  }
+
+  async fn find_by_email(&self, email: &str) -> Result<Option<chem_domain::user::User>, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let opt = schema::users::dsl::users.filter(schema::users::dsl::email.eq(email))
+                                       .first::<UserRow>(&mut conn)
+                                       .optional()
+                                       .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(opt.map(|r| {
+            chem_domain::user::User { id: Uuid::parse_str(&r.id).unwrap_or_else(|_| Uuid::new_v4()),
+                                      name: r.name,
+                                      email: r.email,
+                                      university: r.university,
+                                      password_hash: r.password_hash,
+                                      created_at:
+                                        chrono::DateTime::from_timestamp(r.created_at, 0).unwrap_or_else(chrono::Utc::now),
+                                      updated_at:
+                                        chrono::DateTime::from_timestamp(r.updated_at, 0).unwrap_or_else(chrono::Utc::now) }
+          }))
+  }
+
+  async fn delete(&self, id: &Uuid) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let id_s = id.to_string();
+    map_db_err(diesel::delete(schema::users::dsl::users.filter(schema::users::dsl::id.eq(id_s))).execute(&mut conn))?;
+    Ok(())
+  }
+}
+
+// ======================= TeamRepository (async) =============================
+#[async_trait]
+impl TeamRepository for DieselDomainRepository {
+  async fn save(&self, team: &chem_domain::team::Team) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = TeamRow { id: team.id.to_string(),
+                        name: team.name.clone(),
+                        description: team.description.clone(),
+                        created_at: team.created_at.timestamp(),
+                        updated_at: team.updated_at.timestamp() };
+    map_db_err(diesel::insert_into(schema::teams::table).values(&row)
+                                                        .on_conflict(schema::teams::id)
+                                                        .do_update()
+                                                        .set(&row)
+                                                        .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn find_by_id(&self, id: &Uuid) -> Result<Option<chem_domain::team::Team>, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let id_s = id.to_string();
+    let opt = schema::teams::dsl::teams.filter(schema::teams::dsl::id.eq(&id_s))
+                                       .first::<TeamRow>(&mut conn)
+                                       .optional()
+                                       .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(opt.map(|r| {
+            chem_domain::team::Team { id: Uuid::parse_str(&r.id).unwrap_or(*id),
+                                      name: r.name,
+                                      description: r.description,
+                                      members: Vec::new(),
+                                      created_at:
+                                        chrono::DateTime::from_timestamp(r.created_at, 0).unwrap_or_else(chrono::Utc::now),
+                                      updated_at:
+                                        chrono::DateTime::from_timestamp(r.updated_at, 0).unwrap_or_else(chrono::Utc::now) }
+          }))
+  }
+
+  async fn delete(&self, id: &Uuid) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let id_s = id.to_string();
+    map_db_err(diesel::delete(schema::teams::dsl::teams.filter(schema::teams::dsl::id.eq(id_s))).execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn add_member(&self, team_id: &Uuid, user_id: &Uuid) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = TeamMemberRowDb { team_id: team_id.to_string(), user_id: user_id.to_string() };
+    map_db_err(diesel::insert_into(schema::team_members::table).values(&row).execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn remove_member(&self, team_id: &Uuid, user_id: &Uuid) -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let t = team_id.to_string();
+    let u = user_id.to_string();
+    map_db_err(diesel::delete(schema::team_members::dsl::team_members
+                                .filter(schema::team_members::dsl::team_id.eq(t))
+                                .filter(schema::team_members::dsl::user_id.eq(u)))
+                                .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn get_team_members(&self, team_id: &Uuid) -> Result<Vec<chem_domain::user::User>, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let t = team_id.to_string();
+    let user_ids =
+      schema::team_members::dsl::team_members.filter(schema::team_members::dsl::team_id.eq(t))
+                                             .select(schema::team_members::dsl::user_id)
+                                             .load::<String>(&mut conn)
+                                             .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    let rows = schema::users::dsl::users.filter(schema::users::dsl::id.eq_any(user_ids))
+                                        .load::<UserRow>(&mut conn)
+                                        .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(rows.into_iter()
+           .map(|r| {
+             chem_domain::user::User { id: Uuid::parse_str(&r.id).unwrap_or_else(|_| Uuid::new_v4()),
+                                       name: r.name,
+                                       email: r.email,
+                                       university: r.university,
+                                       password_hash: r.password_hash,
+                                       created_at:
+                                         chrono::DateTime::from_timestamp(r.created_at, 0).unwrap_or_else(chrono::Utc::now),
+                                       updated_at:
+                                         chrono::DateTime::from_timestamp(r.updated_at, 0).unwrap_or_else(chrono::Utc::now) }
+           })
+           .collect())
+  }
+}
+
+// ======================== AccessControl (async) =============================
+#[async_trait]
+impl AccessControl for DieselDomainRepository {
+  async fn grant_molecule_family_access(&self,
+                                        family_id: &Uuid,
+                                        accessor_id: &Uuid,
+                                        accessor_type: chem_domain::access::AccessorType)
+                                        -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = MoleculeFamilyAccessRow { family_id: family_id.to_string(),
+                                        accessor_id: accessor_id.to_string(),
+                                        accessor_type: accessor_type.to_string() };
+    map_db_err(diesel::insert_into(schema::molecule_family_access::table).values(&row).execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn revoke_molecule_family_access(&self,
+                                         family_id: &Uuid,
+                                         accessor_id: &Uuid,
+                                         accessor_type: &chem_domain::access::AccessorType)
+                                         -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let f = family_id.to_string();
+    let a = accessor_id.to_string();
+    map_db_err(diesel::delete(schema::molecule_family_access::dsl::molecule_family_access
+                                .filter(schema::molecule_family_access::dsl::family_id.eq(f))
+                                .filter(schema::molecule_family_access::dsl::accessor_id.eq(a))
+                                .filter(schema::molecule_family_access::dsl::accessor_type.eq(accessor_type.to_string())))
+                                .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn has_molecule_family_access(&self, user_id: &Uuid, family_id: &Uuid) -> Result<bool, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let u = user_id.to_string();
+    let f = family_id.to_string();
+    let cnt_user: i64 = schema::molecule_family_access::dsl::molecule_family_access
+      .filter(schema::molecule_family_access::dsl::family_id.eq(&f))
+      .filter(schema::molecule_family_access::dsl::accessor_id.eq(&u))
+      .filter(schema::molecule_family_access::dsl::accessor_type.eq("user"))
+      .select(diesel::dsl::count_star())
+      .first(&mut conn)
+      .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    if cnt_user > 0 {
+      return Ok(true);
+    }
+    let team_ids =
+      schema::team_members::dsl::team_members.filter(schema::team_members::dsl::user_id.eq(&u))
+                                             .select(schema::team_members::dsl::team_id)
+                                             .load::<String>(&mut conn)
+                                             .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    if team_ids.is_empty() {
+      return Ok(false);
+    }
+    let cnt_team: i64 = schema::molecule_family_access::dsl::molecule_family_access
+      .filter(schema::molecule_family_access::dsl::family_id.eq(&f))
+      .filter(schema::molecule_family_access::dsl::accessor_id.eq_any(team_ids))
+      .filter(schema::molecule_family_access::dsl::accessor_type.eq("team"))
+      .select(diesel::dsl::count_star())
+      .first(&mut conn)
+      .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(cnt_team > 0)
+  }
+
+  async fn grant_molecule_access(&self,
+                                 molecule_id: &Uuid,
+                                 accessor_id: &Uuid,
+                                 accessor_type: chem_domain::access::AccessorType)
+                                 -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = MoleculeAccessRow { molecule_id: molecule_id.to_string(),
+                                  accessor_id: accessor_id.to_string(),
+                                  accessor_type: accessor_type.to_string() };
+    map_db_err(diesel::insert_into(schema::molecule_access::table).values(&row).execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn revoke_molecule_access(&self,
+                                  molecule_id: &Uuid,
+                                  accessor_id: &Uuid,
+                                  accessor_type: &chem_domain::access::AccessorType)
+                                  -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let m = molecule_id.to_string();
+    let a = accessor_id.to_string();
+    map_db_err(diesel::delete(schema::molecule_access::dsl::molecule_access
+                                .filter(schema::molecule_access::dsl::molecule_id.eq(m))
+                                .filter(schema::molecule_access::dsl::accessor_id.eq(a))
+                                .filter(schema::molecule_access::dsl::accessor_type.eq(accessor_type.to_string())))
+                                .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn has_molecule_access(&self, user_id: &Uuid, molecule_id: &Uuid) -> Result<bool, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let u = user_id.to_string();
+    let m = molecule_id.to_string();
+    let cnt_user: i64 =
+      schema::molecule_access::dsl::molecule_access.filter(schema::molecule_access::dsl::molecule_id.eq(&m))
+                                                   .filter(schema::molecule_access::dsl::accessor_id.eq(&u))
+                                                   .filter(schema::molecule_access::dsl::accessor_type.eq("user"))
+                                                   .select(diesel::dsl::count_star())
+                                                   .first(&mut conn)
+                                                   .map_err(|e| {
+                                                     DomainError::persistence("database", format!("db: {}", e))
+                                                   })?;
+    if cnt_user > 0 {
+      return Ok(true);
+    }
+    let team_ids =
+      schema::team_members::dsl::team_members.filter(schema::team_members::dsl::user_id.eq(&u))
+                                             .select(schema::team_members::dsl::team_id)
+                                             .load::<String>(&mut conn)
+                                             .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    if team_ids.is_empty() {
+      return Ok(false);
+    }
+    let cnt_team: i64 =
+      schema::molecule_access::dsl::molecule_access.filter(schema::molecule_access::dsl::molecule_id.eq(&m))
+                                                   .filter(schema::molecule_access::dsl::accessor_id.eq_any(team_ids))
+                                                   .filter(schema::molecule_access::dsl::accessor_type.eq("team"))
+                                                   .select(diesel::dsl::count_star())
+                                                   .first(&mut conn)
+                                                   .map_err(|e| {
+                                                     DomainError::persistence("database", format!("db: {}", e))
+                                                   })?;
+    Ok(cnt_team > 0)
+  }
+
+  async fn grant_flow_access(&self,
+                             flow_id: &Uuid,
+                             accessor_id: &Uuid,
+                             accessor_type: chem_domain::access::AccessorType)
+                             -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let row = FlowAccessRow { flow_id: flow_id.to_string(),
+                              accessor_id: accessor_id.to_string(),
+                              accessor_type: accessor_type.to_string() };
+    map_db_err(diesel::insert_into(schema::flow_access::table).values(&row).execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn revoke_flow_access(&self,
+                              flow_id: &Uuid,
+                              accessor_id: &Uuid,
+                              accessor_type: &chem_domain::access::AccessorType)
+                              -> Result<(), DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let f = flow_id.to_string();
+    let a = accessor_id.to_string();
+    map_db_err(diesel::delete(schema::flow_access::dsl::flow_access
+                                .filter(schema::flow_access::dsl::flow_id.eq(f))
+                                .filter(schema::flow_access::dsl::accessor_id.eq(a))
+                                .filter(schema::flow_access::dsl::accessor_type.eq(accessor_type.to_string())))
+                                .execute(&mut conn))?;
+    Ok(())
+  }
+
+  async fn has_flow_access(&self, user_id: &Uuid, flow_id: &Uuid) -> Result<bool, DomainError> {
+    let mut conn = self.pool.get().map_err(|e| DomainError::persistence("database", format!("pool: {}", e)))?;
+    let u = user_id.to_string();
+    let f = flow_id.to_string();
+    let cnt_user: i64 =
+      schema::flow_access::dsl::flow_access.filter(schema::flow_access::dsl::flow_id.eq(&f))
+                                           .filter(schema::flow_access::dsl::accessor_id.eq(&u))
+                                           .filter(schema::flow_access::dsl::accessor_type.eq("user"))
+                                           .select(diesel::dsl::count_star())
+                                           .first(&mut conn)
+                                           .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    if cnt_user > 0 {
+      return Ok(true);
+    }
+    let team_ids =
+      schema::team_members::dsl::team_members.filter(schema::team_members::dsl::user_id.eq(&u))
+                                             .select(schema::team_members::dsl::team_id)
+                                             .load::<String>(&mut conn)
+                                             .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    if team_ids.is_empty() {
+      return Ok(false);
+    }
+    let cnt_team: i64 =
+      schema::flow_access::dsl::flow_access.filter(schema::flow_access::dsl::flow_id.eq(&f))
+                                           .filter(schema::flow_access::dsl::accessor_id.eq_any(team_ids))
+                                           .filter(schema::flow_access::dsl::accessor_type.eq("team"))
+                                           .select(diesel::dsl::count_star())
+                                           .first(&mut conn)
+                                           .map_err(|e| DomainError::persistence("database", format!("db: {}", e)))?;
+    Ok(cnt_team > 0)
+  }
 }
 // Implementation of MoleculeReader port
 impl MoleculeReader for DieselDomainRepository {

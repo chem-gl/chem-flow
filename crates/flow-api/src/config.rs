@@ -20,6 +20,9 @@ pub struct AppConfig {
 
   /// Indica si está en modo desarrollo
   pub is_dev: bool,
+
+  /// Secreto para firmar los JWT
+  pub jwt_secret: String,
 }
 
 impl AppConfig {
@@ -40,7 +43,9 @@ impl AppConfig {
 
     let is_dev = env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()).to_lowercase() == "development";
 
-    Ok(Self { database_url, port, host, log_level, is_dev })
+    let jwt_secret = env::var("JWT_SECRET").unwrap_or_else(|_| "default-secret-for-dev".to_string());
+
+    Ok(Self { database_url, port, host, log_level, is_dev, jwt_secret })
   }
 
   /// Dirección completa del servidor

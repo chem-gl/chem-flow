@@ -93,4 +93,68 @@ diesel::table! {
         molecule_inchikey -> Text,
     }
 }
-allow_tables_to_appear_in_same_query!(molecules, families, family_properties, molecular_properties, family_members);
+// allow_tables_to_appear_in_same_query!(molecules, families, family_properties,
+// molecular_properties, family_members);
+
+diesel::table! {
+    users (id) {
+        id -> Text,
+        name -> Text,
+        email -> Text,
+        university -> Nullable<Text>,
+        password_hash -> Text,
+        created_at -> BigInt,
+        updated_at -> BigInt,
+    }
+}
+
+diesel::table! {
+    teams (id) {
+        id -> Text,
+        name -> Text,
+        description -> Nullable<Text>,
+        created_at -> BigInt,
+        updated_at -> BigInt,
+    }
+}
+
+diesel::table! {
+    team_members (team_id, user_id) {
+        team_id -> Text,
+        user_id -> Text,
+    }
+}
+
+diesel::table! {
+    molecule_family_access (family_id, accessor_id, accessor_type) {
+        family_id -> Text,
+        accessor_id -> Text,
+        accessor_type -> Text,
+    }
+}
+
+diesel::table! {
+    molecule_access (molecule_id, accessor_id, accessor_type) {
+        molecule_id -> Text,
+        accessor_id -> Text,
+        accessor_type -> Text,
+    }
+}
+
+diesel::table! {
+    flow_access (flow_id, accessor_id, accessor_type) {
+        flow_id -> Text,
+        accessor_id -> Text,
+        accessor_type -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(users,
+                                      teams,
+                                      team_members,
+                                      molecule_family_access,
+                                      molecule_access,
+                                      flow_access,
+                                      flows,
+                                      molecules,
+                                      families);

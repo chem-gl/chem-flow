@@ -240,3 +240,159 @@ pub struct ExecutionSummary {
   pub created_at: String,
   pub updated_at: String,
 }
+
+// ============================================================================
+// DTOs de Autenticación y Usuarios
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RegisterUserRequest {
+  pub name: String,
+  pub email: String,
+  pub university: Option<String>,
+  pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct LoginRequest {
+  pub email: String,
+  pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct LoginResponse {
+  pub token: String,
+  pub token_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserResponse {
+  pub id: Uuid,
+  pub name: String,
+  pub email: String,
+  pub university: Option<String>,
+  pub created_at: String,
+  pub updated_at: String,
+}
+
+// ============================================================================
+// DTOs de Equipos
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateTeamRequest {
+  pub name: String,
+  pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TeamResponse {
+  pub id: Uuid,
+  pub name: String,
+  pub description: Option<String>,
+  pub created_at: String,
+  pub updated_at: String,
+  #[schema(inline)]
+  pub members: Vec<UserResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TeamMemberRequest {
+  pub user_id: Uuid,
+}
+
+// ============================================================================
+// DTOs de Moléculas
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateMoleculeRequest {
+  pub smiles: String,
+  #[serde(default)]
+  pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct MoleculeResponse {
+  pub id: Uuid,
+  pub inchikey: String,
+  pub smiles: String,
+  pub inchi: String,
+  pub molecular_formula: Option<String>,
+  #[serde(default)]
+  pub metadata: serde_json::Value,
+  pub created_at: String,
+  pub updated_at: String,
+}
+
+// ============================================================================
+// DTOs de Familias
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateFamilyRequest {
+  pub name: Option<String>,
+  pub description: Option<String>,
+  /// InChIKeys de moléculas existentes a incluir
+  #[serde(default)]
+  pub molecule_inchikeys: Vec<String>,
+  /// Provenance/metadata de la familia
+  #[serde(default)]
+  pub provenance: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FamilyResponse {
+  pub id: Uuid,
+  pub name: Option<String>,
+  pub description: Option<String>,
+  #[serde(default)]
+  pub provenance: serde_json::Value,
+  #[serde(default)]
+  pub molecule_inchikeys: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct AddMoleculeToFamilyRequest {
+  /// InChIKey de molécula ya existente
+  pub molecule_inchikey: String,
+}
+
+// ============================================================================
+// DTOs de Propiedades
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateFamilyPropertyRequest {
+  pub family_id: Uuid,
+  pub property_type: String,
+  pub value: serde_json::Value,
+  pub quality: Option<String>,
+  #[serde(default)]
+  pub preferred: bool,
+  #[serde(default)]
+  pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CreateMolecularPropertyRequest {
+  pub molecule_inchikey: String,
+  pub property_type: String,
+  pub value: serde_json::Value,
+  pub quality: Option<String>,
+  #[serde(default)]
+  pub preferred: bool,
+  #[serde(default)]
+  pub metadata: serde_json::Value,
+}
+
+// ============================================================================
+// DTOs de Control de Acceso
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GrantAccessRequest {
+  pub accessor_id: Uuid,
+  /// "user" o "team"
+  pub accessor_type: String,
+}

@@ -1,9 +1,12 @@
 use crate::domain::entities::{Molecule, MoleculeFamily};
 use crate::ports::{FamilyRepository, MoleculeReader, MoleculeWriter, PropertyRepository};
+use crate::team::Team;
+use crate::user::User;
 use crate::DomainError;
 use crate::{OwnedFamilyProperty, OwnedMolecularProperty};
 use serde_json::json;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 pub struct DomainStubs;
@@ -14,13 +17,29 @@ pub struct InMemoryDomainRepository {
   molecules: Arc<Mutex<HashMap<String, Molecule>>>,
   family_properties: Arc<Mutex<HashMap<Uuid, OwnedFamilyProperty>>>,
   molecular_properties: Arc<Mutex<HashMap<Uuid, OwnedMolecularProperty>>>,
+  #[allow(dead_code)]
+  users: Arc<Mutex<HashMap<Uuid, User>>>,
+  #[allow(dead_code)]
+  teams: Arc<Mutex<HashMap<Uuid, Team>>>,
+  // simple access control stores
+  #[allow(dead_code)]
+  family_access: Arc<Mutex<HashSet<(Uuid, Uuid, String)>>>, // (family_id, accessor_id, accessor_type)
+  #[allow(dead_code)]
+  molecule_access: Arc<Mutex<HashSet<(Uuid, Uuid, String)>>>,
+  #[allow(dead_code)]
+  flow_access: Arc<Mutex<HashSet<(Uuid, Uuid, String)>>>,
 }
 impl InMemoryDomainRepository {
   pub fn new() -> Self {
     Self { families: Arc::new(Mutex::new(HashMap::new())),
            molecules: Arc::new(Mutex::new(HashMap::new())),
            family_properties: Arc::new(Mutex::new(HashMap::new())),
-           molecular_properties: Arc::new(Mutex::new(HashMap::new())) }
+           molecular_properties: Arc::new(Mutex::new(HashMap::new())),
+           users: Arc::new(Mutex::new(HashMap::new())),
+           teams: Arc::new(Mutex::new(HashMap::new())),
+           family_access: Arc::new(Mutex::new(HashSet::new())),
+           molecule_access: Arc::new(Mutex::new(HashSet::new())),
+           flow_access: Arc::new(Mutex::new(HashSet::new())) }
   }
   // Helper to map poisoned mutex errors into DomainError
   fn lock_map<'a, T>(&'a self, m: &'a Mutex<T>, name: &str) -> Result<MutexGuard<'a, T>, DomainError> {
@@ -161,6 +180,140 @@ impl DomainStubs {
     //   pertenece a una familia
     // - repo.delete_family(&f_id) -> elimina familia y propiedades
     repo
+  }
+}
+// Async trait implementations to satisfy AllDomainPorts for in-memory repo
+use crate::ports::{
+  AccessControl as AsyncAccessControl, TeamRepository as AsyncTeamRepository, UserRepository as AsyncUserRepository,
+};
+use async_trait::async_trait;
+
+#[async_trait]
+impl AsyncUserRepository for InMemoryDomainRepository {
+  async fn save(&self, user: &crate::user::User) -> Result<(), crate::DomainError> {
+    let mut users = self.lock_map(&self.users, "users")?;
+    users.insert(user.id, user.clone());
+    Ok(())
+  }
+  async fn find_by_id(&self, id: &Uuid) -> Result<Option<crate::user::User>, crate::DomainError> {
+    let users = self.lock_map(&self.users, "users")?;
+    Ok(users.get(id).cloned())
+  }
+  async fn find_by_email(&self, email: &str) -> Result<Option<crate::user::User>, crate::DomainError> {
+    let users = self.lock_map(&self.users, "users")?;
+    Ok(users.values().find(|u| u.email == email).cloned())
+  }
+  async fn delete(&self, id: &Uuid) -> Result<(), crate::DomainError> {
+    let mut users = self.lock_map(&self.users, "users")?;
+    users.remove(id);
+    Ok(())
+  }
+}
+
+#[async_trait]
+impl AsyncTeamRepository for InMemoryDomainRepository {
+  async fn save(&self, team: &crate::team::Team) -> Result<(), crate::DomainError> {
+    let mut teams = self.lock_map(&self.teams, "teams")?;
+    teams.insert(team.id, team.clone());
+    Ok(())
+  }
+  async fn find_by_id(&self, id: &Uuid) -> Result<Option<crate::team::Team>, crate::DomainError> {
+    let teams = self.lock_map(&self.teams, "teams")?;
+    Ok(teams.get(id).cloned())
+  }
+  async fn delete(&self, id: &Uuid) -> Result<(), crate::DomainError> {
+    let mut teams = self.lock_map(&self.teams, "teams")?;
+    teams.remove(id);
+    Ok(())
+  }
+  async fn add_member(&self, team_id: &Uuid, user_id: &Uuid) -> Result<(), crate::DomainError> {
+    let mut teams = self.lock_map(&self.teams, "teams")?;
+    let users = self.lock_map(&self.users, "users")?;
+    let team = teams.get_mut(team_id).ok_or_else(|| crate::DomainError::not_found("Team", team_id.to_string()))?;
+    let user = users.get(user_id).cloned().ok_or_else(|| crate::DomainError::not_found("User", user_id.to_string()))?;
+    team.add_member(user);
+    Ok(())
+  }
+  async fn remove_member(&self, team_id: &Uuid, user_id: &Uuid) -> Result<(), crate::DomainError> {
+    let mut teams = self.lock_map(&self.teams, "teams")?;
+    let team = teams.get_mut(team_id).ok_or_else(|| crate::DomainError::not_found("Team", team_id.to_string()))?;
+    team.remove_member(user_id);
+    Ok(())
+  }
+  async fn get_team_members(&self, team_id: &Uuid) -> Result<Vec<crate::user::User>, crate::DomainError> {
+    let teams = self.lock_map(&self.teams, "teams")?;
+    let team = teams.get(team_id).ok_or_else(|| crate::DomainError::not_found("Team", team_id.to_string()))?;
+    Ok(team.members.clone())
+  }
+}
+
+#[async_trait]
+impl AsyncAccessControl for InMemoryDomainRepository {
+  async fn grant_molecule_family_access(&self,
+                                        family_id: &Uuid,
+                                        accessor_id: &Uuid,
+                                        accessor_type: crate::access::AccessorType)
+                                        -> Result<(), crate::DomainError> {
+    let mut fa = self.lock_map(&self.family_access, "family_access")?;
+    fa.insert((*family_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn revoke_molecule_family_access(&self,
+                                         family_id: &Uuid,
+                                         accessor_id: &Uuid,
+                                         accessor_type: &crate::access::AccessorType)
+                                         -> Result<(), crate::DomainError> {
+    let mut fa = self.lock_map(&self.family_access, "family_access")?;
+    fa.remove(&(*family_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn has_molecule_family_access(&self, user_id: &Uuid, family_id: &Uuid) -> Result<bool, crate::DomainError> {
+    let fa = self.lock_map(&self.family_access, "family_access")?;
+    Ok(fa.contains(&(*family_id, *user_id, crate::access::AccessorType::User.to_string())))
+  }
+  async fn grant_molecule_access(&self,
+                                 molecule_id: &Uuid,
+                                 accessor_id: &Uuid,
+                                 accessor_type: crate::access::AccessorType)
+                                 -> Result<(), crate::DomainError> {
+    let mut ma = self.lock_map(&self.molecule_access, "molecule_access")?;
+    ma.insert((*molecule_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn revoke_molecule_access(&self,
+                                  molecule_id: &Uuid,
+                                  accessor_id: &Uuid,
+                                  accessor_type: &crate::access::AccessorType)
+                                  -> Result<(), crate::DomainError> {
+    let mut ma = self.lock_map(&self.molecule_access, "molecule_access")?;
+    ma.remove(&(*molecule_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn has_molecule_access(&self, user_id: &Uuid, molecule_id: &Uuid) -> Result<bool, crate::DomainError> {
+    let ma = self.lock_map(&self.molecule_access, "molecule_access")?;
+    Ok(ma.contains(&(*molecule_id, *user_id, crate::access::AccessorType::User.to_string())))
+  }
+  async fn grant_flow_access(&self,
+                             flow_id: &Uuid,
+                             accessor_id: &Uuid,
+                             accessor_type: crate::access::AccessorType)
+                             -> Result<(), crate::DomainError> {
+    let mut fa = self.lock_map(&self.flow_access, "flow_access")?;
+    fa.insert((*flow_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn revoke_flow_access(&self,
+                              flow_id: &Uuid,
+                              accessor_id: &Uuid,
+                              accessor_type: &crate::access::AccessorType)
+                              -> Result<(), crate::DomainError> {
+    let mut fa = self.lock_map(&self.flow_access, "flow_access")?;
+    fa.remove(&(*flow_id, *accessor_id, accessor_type.to_string()));
+    Ok(())
+  }
+  async fn has_flow_access(&self, user_id: &Uuid, flow_id: &Uuid) -> Result<bool, crate::DomainError> {
+    let fa = self.lock_map(&self.flow_access, "flow_access")?;
+    Ok(fa.contains(&(*flow_id, *user_id, crate::access::AccessorType::User.to_string())))
   }
 }
 #[cfg(test)]
