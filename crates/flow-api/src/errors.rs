@@ -34,6 +34,8 @@ pub enum ApiError {
 
   #[error("Error de dominio: {0}")]
   DomainError(String),
+  #[error("No autorizado: {0}")]
+  Unauthorized(String),
 }
 
 /// Cuerpo de respuesta de error estandarizado
@@ -66,6 +68,7 @@ impl IntoResponse for ApiError {
       ApiError::WorkflowError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
       ApiError::PersistenceError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
       ApiError::DomainError(msg) => (StatusCode::BAD_REQUEST, msg),
+      ApiError::Unauthorized(msg) => (StatusCode::FORBIDDEN, msg),
     };
 
     let error_response = ErrorResponse::new(status, message);

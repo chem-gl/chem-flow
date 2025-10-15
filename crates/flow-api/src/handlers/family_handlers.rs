@@ -1,3 +1,4 @@
+use crate::auth::Claims;
 use axum::extract::State;
 use axum::Json;
 use std::sync::Arc;
@@ -6,13 +7,11 @@ use crate::errors::ApiError;
 use crate::handlers::AppState;
 use crate::models::{CreateFamilyRequest, FamilyResponse};
 
-#[allow(dead_code)]
-pub async fn create_family(State(_state): State<Arc<AppState>>,
+pub async fn create_family(State(state): State<Arc<AppState>>,
+                           claims: Claims,
                            Json(req): Json<CreateFamilyRequest>)
-                           -> Result<Json<FamilyResponse>, ApiError> {
-  // Family endpoints are not implemented yet; return a clear error until
-  // the service and routes are implemented and AppState contains the
-  // necessary services.
-  let _ = req; // keep unused-binding silence
-  Err(ApiError::InternalError("Not implemented: family endpoints are pending".into()))
+                           -> Result<(axum::http::StatusCode, Json<FamilyResponse>), ApiError> {
+  let svc = state.family_service.clone();
+  let resp = svc.create_family(req, Some(claims.sub)).await?;
+  Ok((axum::http::StatusCode::CREATED, Json(resp)))
 }

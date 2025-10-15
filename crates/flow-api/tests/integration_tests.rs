@@ -16,12 +16,18 @@ fn create_test_state() -> AppState {
 
   // Crear base de datos temporal SQLite para tests
   let temp_db = chem_persistence::test_helpers::create_temp_sqlite_db().unwrap();
+  let domain_repo = Arc::new(chem_persistence::DieselDomainRepository::new_with_pool(temp_db.pool.clone()).unwrap());
 
-  let cadma_service =
-    Arc::new(CadmaService::new(flow_repo,
-                               Arc::new(chem_persistence::DieselDomainRepository::new_with_pool(temp_db.pool.clone()).unwrap())));
+  let cadma_service = Arc::new(CadmaService::new(flow_repo.clone(), domain_repo.clone()));
 
-  AppState { cadma_service }
+  // Family service (test placeholder)
+  let family_service = Arc::new(flow_api::services::FamilyService::new(domain_repo.clone()));
+  let molecule_service = Arc::new(flow_api::services::MoleculeService::new(domain_repo.clone()));
+  let property_service = Arc::new(flow_api::services::PropertyService::new(domain_repo.clone()));
+  let user_service = Arc::new(flow_api::services::UserService::new(domain_repo.clone()));
+  let team_service = Arc::new(flow_api::services::TeamService::new(domain_repo.clone()));
+
+  AppState { cadma_service, family_service, molecule_service, property_service, user_service, team_service }
 }
 
 #[tokio::test]

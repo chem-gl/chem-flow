@@ -122,7 +122,16 @@ fn create_from_parts(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<d
   let meta_s = prompt("Metadatos (JSON, opcional, enter para vacio): ")?;
   let metadata: JsonValue =
     if meta_s.trim().is_empty() { json!({}) } else { serde_json::from_str(&meta_s).unwrap_or(json!({"raw": meta_s})) };
-  match Molecule::from_parts(&inchikey, &smiles, &inchi, metadata) {
+  match Molecule::from_parts(&inchikey, // InChIKey
+                             &smiles,   // SMILES
+                             &inchi,    // InChI
+                             None,      // name (Option<String>)
+                             None,      // formula (Option<String>)
+                             None,      // mass (Option<f64>)
+                             None,      // charge (Option<i32>)
+                             None,      // stereochemistry (Option<String>)
+                             metadata   /* metadata (JsonValue) */)
+  {
     Ok(m) => match repo.save_molecule(m.clone()) {
       Ok(key) => println!("Molécula guardada con InChIKey={}", key),
       Err(e) => println!("Error guardando molécula: {:?}", e),
@@ -136,9 +145,14 @@ fn create_from_smiles(repo: &dyn chem_domain::AllDomainPorts) -> Result<(), Box<
   println!("Creando molécula desde SMILES (puede fallar si no hay motor químico)...");
   println!("NOTA: from_smiles no disponible en Phase 2. Use from_parts con datos conocidos.");
   println!("Ejemplo: CCO -> InChIKey=LFQSCWFLJHTTHZ-UHFFFAOYSA-N, InChI=InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3");
-  match Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",
-                             "CCO",
-                             "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3",
+  match Molecule::from_parts("LFQSCWFLJHTTHZ-UHFFFAOYSA-N",       // inchikey
+                             "CCO",                               // smiles
+                             "InChI=1S/C2H6O/c1-2-3/h3H,2H2,1H3", // inchi
+                             None,                                // name (Option<String>)
+                             None,                                // formula (Option<String>)
+                             None,                                // mass (Option<f64>)
+                             None,                                // charge (Option<i32>)
+                             None,                                // stereochemistry (Option<String>)
                              serde_json::json!({"phase": 2, "source": "example_hardcoded"}))
   {
     Ok(m) => match repo.save_molecule(m.clone()) {

@@ -89,11 +89,18 @@ async fn main() -> Result<()> {
 
   // Crear estado de la aplicación (solo CADMA por ahora; auth/team servicios se
   // añaden cuando estén listos)
-    // Family service (uses the same domain repo)
-    let family_service = Arc::new(crate::services::FamilyService::new(domain_repo.clone()));
+  // Family service (uses the same domain repo)
+  let family_service = Arc::new(crate::services::FamilyService::new(domain_repo.clone()));
 
-    // Crear estado de la aplicación
-    let app_state = AppState { cadma_service, family_service };
+  // Molecule and Property services
+  let molecule_service = Arc::new(crate::services::MoleculeService::new(domain_repo.clone()));
+  let property_service = Arc::new(crate::services::PropertyService::new(domain_repo.clone()));
+  // User and Team services
+  let user_service = Arc::new(crate::services::UserService::new(domain_repo.clone()));
+  let team_service = Arc::new(crate::services::TeamService::new(domain_repo.clone()));
+
+  // Crear estado de la aplicación
+  let app_state = AppState { cadma_service, family_service, molecule_service, property_service, user_service, team_service };
 
   // Crear router con todas las rutas
   let app = create_router(app_state).layer(TraceLayer::new_for_http());

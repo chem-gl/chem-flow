@@ -16,6 +16,10 @@ use uuid::Uuid;
 pub struct AppState {
   pub cadma_service: Arc<CadmaService>,
   pub family_service: Arc<FamilyService>,
+  pub molecule_service: Arc<crate::services::MoleculeService>,
+  pub property_service: Arc<crate::services::PropertyService>,
+  pub user_service: Arc<crate::services::UserService>,
+  pub team_service: Arc<crate::services::TeamService>,
 }
 
 // ============================================================================
